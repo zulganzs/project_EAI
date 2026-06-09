@@ -207,6 +207,74 @@ pos-service/backend/
 | 3D. RabbitMQ subscriber | Test: subscriber parses CDM payload and calls handler (mock) | subscriber.js | Test passes |
 | 3E. Stock deduction | Test: given CDM items, stock decreases + audit log written | Deduction service + audit | Test passes |
 
+**Unit Tests (mocked DB/RabbitMQ — fast, no external deps):**
+
+| Sub-phase | Tests | What it verifies |
+|-----------|-------|-----------------|
+| 3A. Skeleton + /health | 2 tests | GET /health returns 200, valid ISO timestamp |
+| 3B. DB config + schema | 13 tests | Config env vars, pool exports, schema tables/columns |
+| 3B. Ingredient API | 12 tests | GET list, POST create, PATCH update, validation, error handling |
+| 3C. Recipe resolver | 3 tests | Resolve menu→ingredients, unknown menu, empty recipe |
+| 3C. Seed data | 5 tests | seed.sql exists, inserts ingredients, recipes, recipe_items |
+| 3D. RabbitMQ subscriber | 5 tests | Exports, config from env vars |
+| 3D. Subscriber mocked | 3 tests | Queue bind + consume, handler gets parsed CDM, nack on error |
+| 3E. Stock deduction | 4 tests | Single item, multi item, skip no recipe, empty items |
+| 3E. Deduction advanced | 3 tests | Aggregate same ingredient, audit log written, DB failure |
+
+**Integration Tests (real MySQL on port 3307 — no mocks):**
+
+| Test File | Tests | What it verifies |
+|-----------|-------|-----------------|
+| `tests/integration/schema.test.js` | 6 tests | Schema creates tables, INSERT/SELECT, FK constraints, stock decrement, seed.sql execution |
+| `tests/integration/api.test.js` | 6 tests | POST persists, GET retrieves, PATCH updates, round-trip consistency, 404 handling, pool lifecycle |
+
+**Run commands:**
+```bash
+# Unit tests only (no MySQL needed)
+cd inventory-service/backend && npm test
+
+# Integration tests (requires MySQL on port 3307)
+docker run -d --name inventory-test-mysql -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=inventory_test_db -p 3307:3306 mysql:8.0
+cd inventory-service/backend && INVENTORY_DB_PORT=3307 INVENTORY_DB_NAME=inventory_test_db npm run test:integration
+
+# All tests combined
+cd inventory-service/backend && INVENTORY_DB_PORT=3307 INVENTORY_DB_NAME=inventory_test_db npm run test:all
+```
+
+**Files created:**
+```
+inventory-service/backend/
+├── package.json
+├── src/
+│   ├── app.js                        # Express app with /health + /api/inventory routes
+│   ├── server.js                     # Entry point: init pool, connect RabbitMQ, subscribe, start server
+│   ├── config/
+│   │   ├── database.js               # DB config from env vars
+│   │   ├── pool.js                   # MySQL connection pool (initPool, getConnection, closePool)
+│   │   └── schema.sql                # ingredients + recipes + recipe_items + stock_movements DDL
+│   ├── routes/
+│   │   └── ingredient.routes.js      # GET/POST/PATCH /ingredients
+│   ├── services/
+│   │   ├── recipe.service.js         # resolveRecipe(menu_id) → ingredient list
+│   │   └── deduction.service.js      # processTransactionEvent(cdm) → stock deduction + audit
+│   ├── seed/
+│   │   └── seed.sql                  # Demo data: Steak (M001), Nasi Goreng (M002) with BOM
+│   └── messaging/
+│       └── subscriber.js             # RabbitMQ subscriber (connect, subscribe, disconnect)
+└── tests/
+    ├── unit/                         # 50 tests (mocked DB/RabbitMQ)
+    │   ├── health.test.js            # 3A
+    │   ├── database.test.js          # 3B
+    │   ├── ingredient-api.test.js    # 3B
+    │   ├── recipe.test.js            # 3C
+    │   ├── subscriber.test.js        # 3D
+    │   ├── deduction.test.js         # 3E
+    │   └── deduction-advanced.test.js # 3E
+    └── integration/                  # 12 tests (real MySQL, no mocks)
+        ├── schema.test.js            # Schema validation + seed data against real DB
+        └── api.test.js               # Full API round-trip against real DB
+```
+
 ---
 
 ### Phase 4 - Accounting Service (Event Subscriber - Resilience)
@@ -275,7 +343,7 @@ pos-service/backend/
 
 - [x] Phase 1: Shared Foundation ✅ (51 tests passing, committed 06692d2)
 - [x] Phase 2: POS Service ✅ (45 unit + 13 integration = 58 tests, committed 61abaa2 + c76b6ff)
-- [ ] Phase 3: Inventory Service
+- [x] Phase 3: Inventory Service ✅ (50 unit + 12 integration tests, TDD)
 - [ ] Phase 4: Accounting Service
 - [ ] Phase 5: API Gateway + CRM
 - [ ] Phase 6: React Frontends
