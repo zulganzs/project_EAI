@@ -293,14 +293,107 @@ inventory-service/backend/
 
 ### Phase 5 - API Gateway + CRM Service
 
-**Goal:** Build the API Gateway (Content-Based Router) and CRM reservation service.
+**Goal:** Build the API Gateway (Content-Based Router) that routes requests to downstream services based on URL path, and the CRM reservation service with its own MySQL database.
+
+**Unit Tests (mocked DB/proxy — fast, no external deps):**
 
 | Sub-phase | Test First | Implement | Verify |
 |-----------|-----------|-----------|--------|
-| 5A. Gateway skeleton + /health | Test: GET /health returns 200 | Express app with proxy middleware | Test passes |
-| 5B. Content-Based Router | Test: /api/pos/* proxies to mock POS, /api/crm/* to mock CRM | http-proxy-middleware routes | Test passes |
-| 5C. CRM backend + DB | Test: POST/GET /api/crm/reservations with mock DB | Schema + model + routes | Test passes |
-| 5D. Gateway to CRM wiring | Test: Gateway /api/crm/reservations reaches CRM | Full proxy chain | Test passes |
+| 5A. Gateway skeleton + /health | Test: GET /health returns 200 | Express app with proxy middleware | 2 tests pass |
+| 5B. Content-Based Router | Test: config reads env vars, proxy routes exist, error handling | http-proxy-middleware routes + routes config | 8 tests pass |
+| 5C. CRM skeleton + /health | Test: GET /health returns 200 | Express app | 2 tests pass |
+| 5C. CRM DB config + schema | Test: config reads env vars, pool exports, schema validates | MySQL pool + reservations DDL | 10 tests pass |
+| 5C. CRM reservation API | Test: POST/GET/PATCH /api/crm/reservations with mock DB | Controller + routes + idGenerator | 15 tests pass |
+| 5D. Gateway to CRM wiring | Test: gateway has proxy routes, CRM app exports, route targets match | Wiring verification | 8 tests pass |
+
+**Integration Tests (real MySQL on port 3307 — no mocks):**
+
+| Test File | Tests | What it verifies |
+|-----------|-------|-----------------|
+| `tests/integration/schema.test.js` | 6 tests | Schema creates tables, correct columns, UNIQUE constraint, INSERT/SELECT round-trip, duplicate rejection, enum status values, status update |
+| `tests/integration/api.test.js` | 6 tests | POST persists to real DB, GET retrieves from real DB, POST→GET round-trip consistency, 404 handling, PATCH updates status, pool lifecycle |
+
+**Run commands:**
+```bash
+# Gateway unit tests (no external deps)
+cd api-gateway && npm test
+
+# CRM unit tests only (no MySQL needed)
+cd crm-service/backend && npm test
+
+# CRM integration tests (requires MySQL on port 3307)
+docker run -d --name crm-test-mysql -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=crm_test_db -p 3307:3306 mysql:8.0
+cd crm-service/backend && CRM_DB_PORT=3307 CRM_DB_NAME=crm_test_db npm run test:integration
+
+# All CRM tests combined
+cd crm-service/backend && CRM_DB_PORT=3307 CRM_DB_NAME=crm_test_db npm run test:all
+```
+
+**Files created:**
+```
+api-gateway/
+├── package.json
+├── src/
+│   ├── app.js                        # Express app with /health + proxy routes
+│   ├── server.js                     # Entry point: start server, log route targets
+│   ├── config/
+│   │   └── routes.js                 # Route targets from env vars (POS/Inventory/CRM URLs)
+│   └── middleware/
+│       └── proxy.js                  # http-proxy-middleware: POS, Inventory, CRM proxies + error handler
+└── tests/
+    └── unit/                         # 18 tests
+        ├── health.test.js            # 5A: Gateway /health
+        ├── router.test.js            # 5B: Content-Based Router config, routing, error handling
+        └── wiring.test.js            # 5D: Gateway-CRM wiring verification
+
+crm-service/backend/
+├── package.json
+├── src/
+│   ├── app.js                        # Express app with /health + /api/crm routes
+│   ├── server.js                     # Entry point: init pool, start server
+│   ├── config/
+│   │   ├── database.js               # DB config from env vars
+│   │   ├── pool.js                   # MySQL connection pool (initPool, getConnection, closePool)
+│   │   └── schema.sql                # reservations DDL (ENUM status: BOOKED/CANCELLED/COMPLETED)
+│   ├── controllers/
+│   │   └── reservation.controller.js # createReservation, getReservations, getReservation, updateReservationStatus
+│   ├── routes/
+│   │   └── reservation.routes.js     # POST/GET/PATCH /reservations with validation
+│   └── utils/
+│       └── idGenerator.js            # generateReservationId() → RSV-YYYYMMDD-XXXX
+└── tests/
+    ├── unit/                         # 27 tests (mocked DB)
+    │   ├── health.test.js            # 5C: CRM /health
+    │   ├── database.test.js          # 5C: DB config, pool, schema validation
+    │   ├── reservation-api.test.js   # 5C: POST reservations (7 tests)
+    │   └── reservation-get-patch.test.js  # 5C: GET list, GET by ID, PATCH status (10 tests)
+    └── integration/                  # 12 tests (real MySQL, no mocks)
+        ├── schema.test.js            # Schema validation against real DB
+        └── api.test.js               # Full API round-trip against real DB
+```
+
+**Key Gateway routing (Content-Based Router pattern):**
+```
+Client → API Gateway :3000
+         ├── /api/pos/*       → POS_BASE_URL       (default: http://localhost:3001)
+         ├── /api/inventory/* → INVENTORY_BASE_URL  (default: http://localhost:3002)
+         ├── /api/crm/*       → CRM_BASE_URL        (default: http://localhost:3003)
+         └── /api/* (other)   → 404 Route not found
+```
+
+**CRM Reservation schema:**
+```sql
+reservations (
+    reservation_id VARCHAR(50) UNIQUE,   -- RSV-YYYYMMDD-XXXX
+    customer_name VARCHAR(255) NOT NULL,
+    phone VARCHAR(20),                    -- optional
+    party_size INT NOT NULL,
+    reservation_time DATETIME NOT NULL,
+    table_number INT,                     -- optional
+    status ENUM('BOOKED','CANCELLED','COMPLETED') DEFAULT 'BOOKED',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+```
 
 ---
 
