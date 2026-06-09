@@ -399,13 +399,80 @@ reservations (
 
 ### Phase 6 - React Frontends
 
-**Goal:** Build simple React UIs for POS, Inventory, and CRM.
+**Goal:** Build simple React UIs for POS, Inventory, and CRM. All UIs route requests through the API Gateway (Content-Based Router pattern) via Vite dev proxy in development and `VITE_API_URL` env var in production.
 
-| Sub-phase | Description |
-|-----------|-------------|
-| 6A. POS Cashier UI | Menu list -> cart -> submit -> shows transaction ID |
-| 6B. Inventory UI | View ingredients + stock -> update stock |
-| 6C. CRM UI | List reservations -> create -> update status |
+| Sub-phase | Description | Tech |
+|-----------|-------------|------|
+| 6A. POS Cashier UI | Menu list -> cart -> submit -> shows transaction ID + last transaction details | React 18 + Vite 5 + Axios |
+| 6B. Inventory UI | View ingredients + stock -> update stock -> add new ingredient | React 18 + Vite 5 + Axios |
+| 6C. CRM UI | List reservations -> create -> update status (Booked/Cancelled/Completed) | React 18 + Vite 5 + Axios |
+
+**Run commands:**
+```bash
+# POS Cashier UI
+cd pos-service/frontend && npm install && npm run dev    # dev server on :5173
+cd pos-service/frontend && npm run build                  # production build → dist/
+
+# Inventory Dashboard UI
+cd inventory-service/frontend && npm install && npm run dev
+cd inventory-service/frontend && npm run build
+
+# CRM Reservations UI
+cd crm-service/frontend && npm install && npm run dev
+cd crm-service/frontend && npm run build
+```
+
+**Files created:**
+```
+pos-service/frontend/
+├── package.json
+├── vite.config.js                          # Vite + React plugin + /api proxy → localhost:3000
+├── index.html
+└── src/
+    ├── main.jsx
+    ├── App.jsx
+    ├── components/
+    │   └── CashierPOS.jsx                  # Menu grid, cart, checkout, last transaction display
+    └── services/
+        └── api.js                          # POST /transactions, GET /transactions/:id
+
+inventory-service/frontend/
+├── package.json
+├── vite.config.js                          # Vite + React plugin + /api proxy → localhost:3000
+├── index.html
+└── src/
+    ├── main.jsx
+    ├── App.jsx
+    ├── components/
+    │   └── InventoryDashboard.jsx          # Ingredient table, inline stock edit, add ingredient form
+    └── services/
+        └── api.js                          # GET/POST/PATCH /ingredients
+
+crm-service/frontend/
+├── package.json
+├── vite.config.js                          # Vite + React plugin + /api proxy → localhost:3000
+├── index.html
+└── src/
+    ├── main.jsx
+    ├── App.jsx
+    ├── components/
+    │   └── CRMReservations.jsx             # Reservation table, create form, status update buttons
+    └── services/
+        └── api.js                          # GET/POST /reservations, PATCH /reservations/:id
+```
+
+**Key design decisions:**
+- All 3 frontends proxy `/api` requests to `localhost:3000` (API Gateway) via Vite dev server, ensuring the **Gateway pattern** is exercised in development.
+- In Docker production, each frontend's `VITE_API_URL` is set in `docker-compose.yml` to point through the gateway.
+- Menu items in POS Cashier match the Inventory seed data recipes: **M001 (Steak)**, **M002 (Nasi Goreng)**, plus drinks D001/D002.
+- Inventory stock levels are color-coded: red (≤ 0), orange (≤ 5), green (> 5).
+- CRM status badges use distinct colors: Booked (blue), Completed (green), Cancelled (red).
+- No external CSS frameworks — all inline styles for portability.
+- Each UI has a distinct header color theme: POS (blue `#1a73e8`), Inventory (orange `#ff6d00`), CRM (purple `#7b1fa2`).
+- IDR currency formatting via `Intl.NumberFormat('id-ID')`.
+
+**Build verification:**
+All 3 frontends `npm run build` successfully with Vite, producing optimized production bundles in `dist/`.
 
 ---
 
@@ -439,5 +506,5 @@ reservations (
 - [x] Phase 3: Inventory Service ✅ (50 unit + 12 integration tests, TDD)
 - [x] Phase 4: Accounting Service ✅ (34 unit + 11 integration = 45 tests, C# .NET 10.0, RabbitMQ v7 async, committed 08daa8f + ea59ed2)
 - [x] Phase 5: API Gateway + CRM ✅ (18 gateway unit tests + 27 CRM unit tests = 45 tests, TDD, committed 90ed83f)
-- [x] Phase 6: React Frontends ✅ (3 React + Vite apps, all build successfully: POS Cashier, Inventory Dashboard, CRM Reservations)
+- [x] Phase 6: React Frontends ✅ (3 React + Vite apps — POS Cashier, Inventory Dashboard, CRM Reservations, committed 98cde4b)
 - [ ] Phase 7: Dockerization & Integration
