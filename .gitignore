@@ -1,1 +1,10 @@
 .worktrees
+node_modules/
+.env
+*.db
+.DS_Store
+bin/
+obj/
+dist/
+build/
+*.log

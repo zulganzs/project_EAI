@@ -1,0 +1,203 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # RabbitMQ - Shared Message Broker
+  # ============================================================
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # ============================================================
+  # POS Service (Node.js + MySQL)
+  # ============================================================
+  pos-mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${POS_DB_PASSWORD:-secret}
+      MYSQL_DATABASE: ${POS_DB_NAME:-pos_db}
+    volumes:
+      - pos_mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  pos-backend:
+    build:
+      context: ./pos-service/backend
+      dockerfile: Dockerfile
+    ports:
+      - "${POS_PORT:-3001}:3001"
+    environment:
+      - PORT=3001
+      - POS_DB_HOST=pos-mysql
+      - POS_DB_PORT=3306
+      - POS_DB_NAME=${POS_DB_NAME:-pos_db}
+      - POS_DB_USER=${POS_DB_USER:-root}
+      - POS_DB_PASSWORD=${POS_DB_PASSWORD:-secret}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE:-flowca.events}
+      - RABBITMQ_ROUTING_KEY=${RABBITMQ_ROUTING_KEY:-transaction.completed}
+    depends_on:
+      pos-mysql:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  pos-frontend:
+    build:
+      context: ./pos-service/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-3000}/api/pos
+
+  # ============================================================
+  # Inventory Service (Node.js + MySQL)
+  # ============================================================
+  inventory-mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${INVENTORY_DB_PASSWORD:-secret}
+      MYSQL_DATABASE: ${INVENTORY_DB_NAME:-inventory_db}
+    volumes:
+      - inventory_mysql_data:/var/lib/mysql
+
+  inventory-backend:
+    build:
+      context: ./inventory-service/backend
+      dockerfile: Dockerfile
+    ports:
+      - "${INVENTORY_PORT:-3002}:3002"
+    environment:
+      - PORT=3002
+      - INVENTORY_DB_HOST=inventory-mysql
+      - INVENTORY_DB_PORT=3306
+      - INVENTORY_DB_NAME=${INVENTORY_DB_NAME:-inventory_db}
+      - INVENTORY_DB_USER=${INVENTORY_DB_USER:-root}
+      - INVENTORY_DB_PASSWORD=${INVENTORY_DB_PASSWORD:-secret}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      - INVENTORY_EXCHANGE=${RABBITMQ_EXCHANGE:-flowca.events}
+      - INVENTORY_ROUTING_KEY=${RABBITMQ_ROUTING_KEY:-transaction.completed}
+      - INVENTORY_QUEUE=${INVENTORY_QUEUE:-inventory_queue}
+    depends_on:
+      inventory-mysql:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  inventory-frontend:
+    build:
+      context: ./inventory-service/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8081:80"
+    environment:
+      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-3000}/api/inventory
+
+  # ============================================================
+  # Accounting Service (C# + SQLite)
+  # ============================================================
+  accounting-service:
+    build:
+      context: ./src/Accounting.Service
+      dockerfile: Dockerfile
+    ports:
+      - "${ACCOUNTING_PORT:-5000}:5000"
+    environment:
+      - RABBITMQ_HOSTNAME=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USERNAME=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE:-flowca.events}
+      - RABBITMQ_QUEUE=${ACCOUNTING_QUEUE:-accounting.transactions}
+      - RABBITMQ_ROUTING_KEY=${RABBITMQ_ROUTING_KEY:-transaction.completed}
+      - RABBITMQ_DLQ=${ACCOUNTING_DLQ:-accounting.transactions.dlq}
+      - DATABASE_CONNECTION_STRING=${ACCOUNTING_DB_CONNECTION:-Data Source=/app/data/accounting.db}
+    volumes:
+      - accounting_data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================================================
+  # CRM Service (Node.js + MySQL)
+  # ============================================================
+  crm-mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${CRM_DB_PASSWORD:-secret}
+      MYSQL_DATABASE: ${CRM_DB_NAME:-crm_db}
+    volumes:
+      - crm_mysql_data:/var/lib/mysql
+
+  crm-backend:
+    build:
+      context: ./crm-service/backend
+      dockerfile: Dockerfile
+    ports:
+      - "${CRM_PORT:-3003}:3003"
+    environment:
+      - PORT=3003
+      - CRM_DB_HOST=crm-mysql
+      - CRM_DB_PORT=3306
+      - CRM_DB_NAME=${CRM_DB_NAME:-crm_db}
+      - CRM_DB_USER=${CRM_DB_USER:-root}
+      - CRM_DB_PASSWORD=${CRM_DB_PASSWORD:-secret}
+    depends_on:
+      crm-mysql:
+        condition: service_started
+
+  crm-frontend:
+    build:
+      context: ./crm-service/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8082:80"
+    environment:
+      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-3000}/api/crm
+
+  # ============================================================
+  # API Gateway (Node.js)
+  # ============================================================
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    environment:
+      - GATEWAY_PORT=3000
+      - POS_BASE_URL=http://pos-backend:3001
+      - INVENTORY_BASE_URL=http://inventory-backend:3002
+      - CRM_BASE_URL=http://crm-backend:3003
+    depends_on:
+      - pos-backend
+      - inventory-backend
+      - accounting-service
+      - crm-backend
+
+volumes:
+  rabbitmq_data:
+  pos_mysql_data:
+  inventory_mysql_data:
+  accounting_data:
+  crm_mysql_data:
