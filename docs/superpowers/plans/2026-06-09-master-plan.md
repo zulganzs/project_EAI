@@ -115,13 +115,68 @@ Phase 7: Dockerization & Integration
 
 **Goal:** Build the POS service that creates transactions and publishes TRANSAKSI_SELESAI events to RabbitMQ. This is built first because it defines the Canonical Data Model (CDM) that Inventory and Accounting depend on.
 
+**Unit Tests (mocked DB/RabbitMQ — fast, no external deps):**
+
 | Sub-phase | Test First | Implement | Verify |
 |-----------|-----------|-----------|--------|
-| 2A. Skeleton + /health | Test: GET /health returns 200 | Express app with /health | Test passes |
-| 2B. DB config + schema | Test: mock DB pool query | MySQL pool + transaction tables | Test passes |
-| 2C. Service + ID gen + CDM | Test: ID format + CDM payload shape | idGenerator.js + transaction.service.js | Test passes |
-| 2D. API endpoints | Test: POST /api/pos/transactions returns 201 (mocked) | Controller + routes | Test passes |
-| 2E. RabbitMQ publisher | Test: publishEvent() with mocked amqplib | eventPublisher.js + wire to service | Test passes |
+| 2A. Skeleton + /health | Test: GET /health returns 200 | Express app with /health | 2 tests pass |
+| 2B. DB config + schema | Test: config reads env vars, pool exports functions, schema.sql validates | MySQL pool + transaction tables | 10 tests pass |
+| 2C. Service + ID gen + CDM | Test: ID format + CDM payload shape | idGenerator.js + transaction.service.js | 14 tests pass |
+| 2D. API endpoints | Test: POST /api/pos/transactions returns 201 (mocked DB) | Controller + routes | 12 tests pass |
+| 2E. RabbitMQ publisher | Test: publishEvent() with mocked amqplib | eventPublisher.js + wire to service | 7 tests pass |
+
+**Integration Tests (real MySQL on port 3307 — no mocks):**
+
+| Test File | Tests | What it verifies |
+|-----------|-------|-----------------|
+| `tests/integration/schema.test.js` | 7 tests | Schema SQL creates tables, correct column types, UNIQUE constraint, FK constraint, INSERT/SELECT round-trip, duplicate rejection |
+| `tests/integration/api.test.js` | 6 tests | POST persists to real DB, GET retrieves from real DB, POST→GET round-trip consistency, 404 handling, pool lifecycle, 100 concurrent POSTs with unique IDs |
+
+**Run commands:**
+```bash
+# Unit tests only (no MySQL needed)
+cd pos-service/backend && npm test
+
+# Integration tests (requires MySQL on port 3307)
+docker run -d --name pos-test-mysql -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=pos_test_db -p 3307:3306 mysql:8.0
+cd pos-service/backend && POS_DB_PORT=3307 POS_DB_NAME=pos_test_db npm run test:integration
+
+# All tests combined
+cd pos-service/backend && POS_DB_PORT=3307 POS_DB_NAME=pos_test_db npm run test:all
+```
+
+**Files created:**
+```
+pos-service/backend/
+├── package.json
+├── src/
+│   ├── app.js                        # Express app with /health + /api/pos routes
+│   ├── server.js                     # Entry point: init pool, connect RabbitMQ, start server
+│   ├── config/
+│   │   ├── database.js               # DB config from env vars
+│   │   ├── pool.js                   # MySQL connection pool (initPool, getConnection, closePool)
+│   │   └── schema.sql                # transactions + transaction_items DDL
+│   ├── controllers/
+│   │   └── transaction.controller.js # createTransaction, getTransaction
+│   ├── services/
+│   │   └── transaction.service.js    # buildCDMPayload()
+│   ├── routes/
+│   │   └── transaction.routes.js     # POST/GET /transactions with validation
+│   ├── utils/
+│   │   └── idGenerator.js            # generateTransactionId() → TXN-YYYYMMDD-XXXX
+│   └── messaging/
+│       └── eventPublisher.js         # RabbitMQ publisher (connect, publishEvent, disconnect)
+└── tests/
+    ├── unit/                         # 45 tests (mocked DB/RabbitMQ)
+    │   ├── health.test.js            # 2A
+    │   ├── database.test.js          # 2B
+    │   ├── transaction.test.js       # 2C
+    │   ├── api.test.js               # 2D
+    │   └── publisher.test.js         # 2E
+    └── integration/                  # 13 tests (real MySQL, no mocks)
+        ├── schema.test.js            # Schema validation against real DB
+        └── api.test.js               # Full API round-trip against real DB
+```
 
 **Key CDM output (the contract other services depend on):**
 ```json
@@ -212,13 +267,14 @@ Phase 7: Dockerization & Integration
 3. **No Hardcoding:** All configuration via environment variables.
 4. **CDM Contract:** Phase 2 (POS) must complete first since it defines the event schema that Phase 3 and 4 depend on.
 5. **Working Directory:** All code is created in `/Users/user/Desktop/project_EAI/` on `main` branch.
+6. **Two-Tier Testing:** Each service phase has **unit tests** (mocked DB/RabbitMQ in `tests/unit/`) AND **integration tests** (real MySQL/containers in `tests/integration/`). Unit tests run without external deps. Integration tests require Docker MySQL on port 3307 (`npm run test:integration`).
 
 ---
 
 ## Current Status
 
 - [x] Phase 1: Shared Foundation ✅ (51 tests passing, committed 06692d2)
-- [x] Phase 2: POS Service ✅ (45 tests passing, committed 61abaa2)
+- [x] Phase 2: POS Service ✅ (45 unit + 13 integration = 58 tests, committed 61abaa2 + c76b6ff)
 - [ ] Phase 3: Inventory Service
 - [ ] Phase 4: Accounting Service
 - [ ] Phase 5: API Gateway + CRM
