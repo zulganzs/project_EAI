@@ -24,6 +24,8 @@ describe('5C. CRM Integration - Schema Validation', () => {
     await connection.changeUser({ database: dbConfig.database });
     const schema = fs.readFileSync(path.join(__dirname, '../../src/config/schema.sql'), 'utf8');
     await connection.query(schema);
+    // Clean table before schema tests
+    await connection.query('TRUNCATE TABLE reservations');
   });
 
   afterAll(async () => {

@@ -65,7 +65,7 @@ describe('3B Integration. Schema validation against real DB', () => {
     );
     const [rows] = await db.execute('SELECT * FROM ingredients WHERE name = ?', ['Daging Sapi']);
     expect(rows).toHaveLength(1);
-    expect(rows[0].stock_qty).toBe(10);
+    expect(Number(rows[0].stock_qty)).toBe(10);
   });
 
   test('recipes table accepts valid INSERT with UNIQUE menu_id', async () => {
@@ -120,7 +120,7 @@ describe('3B Integration. Schema validation against real DB', () => {
     const seed = fs.readFileSync(path.join(__dirname, '../../src/seed/seed.sql'), 'utf8');
     const statements = seed.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
     for (const stmt of statements) {
-      await db.execute(stmt);
+      await db.query(stmt);
     }
 
     const [ings] = await db.execute('SELECT COUNT(*) as cnt FROM ingredients');

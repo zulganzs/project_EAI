@@ -30,6 +30,11 @@ describe('5C. CRM Integration - API Round-Trip', () => {
 
     // Initialize the app's pool
     pool.initPool();
+
+    // Clean table before API tests
+    const testConn = await pool.getConnection();
+    await testConn.query('TRUNCATE TABLE reservations');
+    testConn.release();
   });
 
   afterAll(async () => {

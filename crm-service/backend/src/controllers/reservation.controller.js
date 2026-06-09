@@ -18,12 +18,18 @@ async function createReservation(pool, body) {
   const reservation_id = generateReservationId();
   const status = 'BOOKED';
 
+  // Convert ISO datetime to MySQL-compatible format (YYYY-MM-DD HH:MM:SS)
+  const reservationTimeFormatted = new Date(reservation_time)
+    .toISOString()
+    .slice(0, 19)
+    .replace('T', ' ');
+
   const conn = await pool.getConnection();
   try {
     await conn.query(
       `INSERT INTO reservations (reservation_id, customer_name, phone, party_size, reservation_time, table_number, status)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [reservation_id, customer_name, phone, party_size, reservation_time, table_number, status]
+      [reservation_id, customer_name, phone, party_size, reservationTimeFormatted, table_number, status]
     );
 
     return {
