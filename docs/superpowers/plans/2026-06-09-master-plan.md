@@ -344,7 +344,7 @@ inventory-service/backend/
 - [x] Phase 1: Shared Foundation ✅ (51 tests passing, committed 06692d2)
 - [x] Phase 2: POS Service ✅ (45 unit + 13 integration = 58 tests, committed 61abaa2 + c76b6ff)
 - [x] Phase 3: Inventory Service ✅ (50 unit + 12 integration tests, TDD)
-- [ ] Phase 4: Accounting Service
+- [x] Phase 4: Accounting Service ✅ (34 unit tests, C# .NET 10.0, RabbitMQ v7 async, committed 08daa8f)
 - [ ] Phase 5: API Gateway + CRM
 - [ ] Phase 6: React Frontends
 - [ ] Phase 7: Dockerization & Integration
