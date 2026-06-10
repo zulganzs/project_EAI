@@ -4,9 +4,12 @@
   "description": "FlowCA EAI - Foundation test suite",
   "private": true,
   "scripts": {
-    "test": "jest"
+    "test": "jest --testPathIgnorePatterns='tests/e2e/'",
+    "test:docker": "jest tests/dockerfiles.test.js tests/docker-compose.test.js tests/nginx.test.js --verbose",
+    "test:e2e": "jest tests/e2e/ --verbose --runInBand --forceExit"
   },
   "devDependencies": {
+    "axios": "^1.6.0",
     "jest": "^29.7.0",
     "js-yaml": "^4.1.0"
   }

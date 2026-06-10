@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============================================================
   # RabbitMQ - Shared Message Broker
@@ -17,6 +15,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
@@ -30,6 +29,13 @@ services:
       MYSQL_DATABASE: ${POS_DB_NAME:-pos_db}
     volumes:
       - pos_mysql_data:/var/lib/mysql
+      - ./pos-service/backend/src/config/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${POS_DB_PASSWORD:-secret}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
     ports:
       - "3306:3306"
 
@@ -40,7 +46,7 @@ services:
     ports:
       - "${POS_PORT:-3001}:3001"
     environment:
-      - PORT=3001
+      - POS_PORT=3001
       - POS_DB_HOST=pos-mysql
       - POS_DB_PORT=3306
       - POS_DB_NAME=${POS_DB_NAME:-pos_db}
@@ -54,18 +60,20 @@ services:
       - RABBITMQ_ROUTING_KEY=${RABBITMQ_ROUTING_KEY:-transaction.completed}
     depends_on:
       pos-mysql:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    restart: on-failure
 
   pos-frontend:
     build:
       context: ./pos-service/frontend
       dockerfile: Dockerfile
     ports:
-      - "8080:80"
-    environment:
-      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-3000}/api/pos
+      - "${POS_FRONTEND_PORT:-9080}:80"
+    depends_on:
+      - api-gateway
+    restart: on-failure
 
   # ============================================================
   # Inventory Service (Node.js + MySQL)
@@ -77,6 +85,16 @@ services:
       MYSQL_DATABASE: ${INVENTORY_DB_NAME:-inventory_db}
     volumes:
       - inventory_mysql_data:/var/lib/mysql
+      - ./inventory-service/backend/src/config/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./inventory-service/backend/src/seed/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${INVENTORY_DB_PASSWORD:-secret}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    ports:
+      - "3307:3306"
 
   inventory-backend:
     build:
@@ -85,7 +103,7 @@ services:
     ports:
       - "${INVENTORY_PORT:-3002}:3002"
     environment:
-      - PORT=3002
+      - INVENTORY_PORT=3002
       - INVENTORY_DB_HOST=inventory-mysql
       - INVENTORY_DB_PORT=3306
       - INVENTORY_DB_NAME=${INVENTORY_DB_NAME:-inventory_db}
@@ -100,28 +118,30 @@ services:
       - INVENTORY_QUEUE=${INVENTORY_QUEUE:-inventory_queue}
     depends_on:
       inventory-mysql:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    restart: on-failure
 
   inventory-frontend:
     build:
       context: ./inventory-service/frontend
       dockerfile: Dockerfile
     ports:
-      - "8081:80"
-    environment:
-      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-3000}/api/inventory
+      - "${INVENTORY_FRONTEND_PORT:-9081}:80"
+    depends_on:
+      - api-gateway
+    restart: on-failure
 
   # ============================================================
-  # Accounting Service (C# + SQLite)
+  # Accounting Service (C# .NET 10.0 + SQLite)
   # ============================================================
   accounting-service:
     build:
-      context: ./src/Accounting.Service
+      context: ./accounting-service/src/Accounting.Service
       dockerfile: Dockerfile
     ports:
-      - "${ACCOUNTING_PORT:-5000}:5000"
+      - "${ACCOUNTING_PORT:-5001}:5000"
     environment:
       - RABBITMQ_HOSTNAME=rabbitmq
       - RABBITMQ_PORT=5672
@@ -137,6 +157,7 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    restart: on-failure
 
   # ============================================================
   # CRM Service (Node.js + MySQL)
@@ -148,6 +169,15 @@ services:
       MYSQL_DATABASE: ${CRM_DB_NAME:-crm_db}
     volumes:
       - crm_mysql_data:/var/lib/mysql
+      - ./crm-service/backend/src/config/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${CRM_DB_PASSWORD:-secret}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    ports:
+      - "3308:3306"
 
   crm-backend:
     build:
@@ -156,7 +186,7 @@ services:
     ports:
       - "${CRM_PORT:-3003}:3003"
     environment:
-      - PORT=3003
+      - CRM_PORT=3003
       - CRM_DB_HOST=crm-mysql
       - CRM_DB_PORT=3306
       - CRM_DB_NAME=${CRM_DB_NAME:-crm_db}
@@ -164,16 +194,18 @@ services:
       - CRM_DB_PASSWORD=${CRM_DB_PASSWORD:-secret}
     depends_on:
       crm-mysql:
-        condition: service_started
+        condition: service_healthy
+    restart: on-failure
 
   crm-frontend:
     build:
       context: ./crm-service/frontend
       dockerfile: Dockerfile
     ports:
-      - "8082:80"
-    environment:
-      - VITE_API_URL=http://localhost:${GATEWAY_PORT:-3000}/api/crm
+      - "${CRM_FRONTEND_PORT:-9082}:80"
+    depends_on:
+      - api-gateway
+    restart: on-failure
 
   # ============================================================
   # API Gateway (Node.js)
@@ -194,6 +226,7 @@ services:
       - inventory-backend
       - accounting-service
       - crm-backend
+    restart: on-failure
 
 volumes:
   rabbitmq_data:

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/pool');
 const { createTransaction, getTransaction } = require('../controllers/transaction.controller');
+const { buildCDMPayload } = require('../services/transaction.service');
+const eventPublisher = require('../messaging/eventPublisher');
 
 /**
  * Validate request body for creating a transaction.
@@ -27,6 +29,16 @@ router.post('/transactions', async (req, res) => {
 
   try {
     const result = await createTransaction(pool, req.body);
+
+    // Publish TRANSAKSI_SELESAI event to RabbitMQ (fire-and-forget)
+    try {
+      const cdmPayload = buildCDMPayload(result);
+      await eventPublisher.publishEvent(cdmPayload);
+      console.log(`[pos] Published TRANSAKSI_SELESAI for ${result.transaction_id}`);
+    } catch (pubErr) {
+      console.warn(`[pos] Failed to publish event: ${pubErr.message}`);
+    }
+
     return res.status(201).json(result);
   } catch (err) {
     return res.status(500).json({ error: err.message });

@@ -2,9 +2,8 @@ const express = require('express');
 const { posProxy, inventoryProxy, crmProxy } = require('./middleware/proxy');
 
 const app = express();
-app.use(express.json());
 
-// Health check
+// Health check (no body parsing needed)
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -13,10 +12,14 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Content-Based Router — proxy routes to downstream services
+// Content-Based Router — proxy routes MUST be before express.json()
+// to avoid consuming the request body before forwarding
 app.use('/api/pos', posProxy);
 app.use('/api/inventory', inventoryProxy);
 app.use('/api/crm', crmProxy);
+
+// Body parsing for non-proxied routes (e.g., catch-all)
+app.use(express.json());
 
 // Catch-all 404 for unmatched API routes
 app.use('/api', (_req, res) => {

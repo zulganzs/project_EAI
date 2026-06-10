@@ -8,3 +8,4 @@ obj/
 dist/
 build/
 *.log
+.docker/
