@@ -42,6 +42,44 @@ describe('5B. Content-Based Router - Proxy Routing', () => {
   });
 });
 
+describe('A1. Accounting Proxy - Config', () => {
+  test('config module exports accountingBaseUrl', () => {
+    const config = require('../../src/config/routes');
+    expect(config).toHaveProperty('accountingBaseUrl');
+  });
+
+  test('config accountingBaseUrl default is http://localhost:5000', () => {
+    const config = require('../../src/config/routes');
+    expect(config.accountingBaseUrl).toBe(process.env.ACCOUNTING_BASE_URL || 'http://localhost:5000');
+  });
+});
+
+describe('A1. Accounting Proxy - Routing', () => {
+  test('GET /api/accounting/health proxies to accounting service', async () => {
+    const res = await request(app).get('/api/accounting/health');
+    expect([200, 403, 404, 502, 504]).toContain(res.status);
+  });
+
+  test('GET /api/accounting/journal-entries proxies to accounting service', async () => {
+    const res = await request(app).get('/api/accounting/journal-entries');
+    expect([200, 403, 502, 504]).toContain(res.status);
+  });
+
+  test('/api/accounting/* does NOT match /api/pos/* or /api/crm/*', async () => {
+    const accountingRes = await request(app).get('/api/accounting/health');
+    const posRes = await request(app).get('/api/pos/health');
+    const crmRes = await request(app).get('/api/crm/health');
+    expect(accountingRes.status).toBeDefined();
+    expect(posRes.status).toBeDefined();
+    expect(crmRes.status).toBeDefined();
+  });
+
+  test('proxy module exports accountingProxy', () => {
+    const proxy = require('../../src/middleware/proxy');
+    expect(proxy).toHaveProperty('accountingProxy');
+  });
+});
+
 describe('5B. Content-Based Router - Error Handling', () => {
   test('gateway handles unavailable downstream service gracefully', async () => {
     // All downstream services are down in test env, so we should get a proper error

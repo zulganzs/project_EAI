@@ -42,4 +42,11 @@ const crmProxy = createProxyMiddleware({
   on: { error: onProxyError },
 });
 
-module.exports = { posProxy, inventoryProxy, crmProxy };
+const accountingProxy = createProxyMiddleware({
+  target: routes.accountingBaseUrl,
+  changeOrigin: true,
+  pathRewrite: { '^/api/accounting': '/api' },
+  on: { error: onProxyError },
+});
+
+module.exports = { posProxy, inventoryProxy, crmProxy, accountingProxy };

@@ -1,5 +1,5 @@
 const express = require('express');
-const { posProxy, inventoryProxy, crmProxy } = require('./middleware/proxy');
+const { posProxy, inventoryProxy, crmProxy, accountingProxy } = require('./middleware/proxy');
 
 const app = express();
 
@@ -17,6 +17,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/pos', posProxy);
 app.use('/api/inventory', inventoryProxy);
 app.use('/api/crm', crmProxy);
+app.use('/api/accounting', accountingProxy);
 
 // Body parsing for non-proxied routes (e.g., catch-all)
 app.use(express.json());
