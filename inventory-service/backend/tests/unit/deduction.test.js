@@ -40,7 +40,11 @@ describe('3E. Stock Deduction Service', () => {
       { ingredient_id: 2, ingredient_name: 'Kentang', qty_per_menu: 0.3, unit: 'kg' },
     ]);
 
-    mockConnection.query.mockResolvedValue([{ affectedRows: 1 }]);
+    // First query: idempotency SELECT (no existing record)
+    // Subsequent queries: UPDATE + INSERT for each ingredient
+    mockConnection.query
+      .mockResolvedValueOnce([[], []]) // SELECT: not processed yet
+      .mockResolvedValue([{ affectedRows: 1 }]); // UPDATE + INSERT calls
 
     const result = await processTransactionEvent(cdmPayload);
 
@@ -78,7 +82,11 @@ describe('3E. Stock Deduction Service', () => {
       { ingredient_id: 4, ingredient_name: 'Telur', qty_per_menu: 2, unit: 'butir' },
     ]);
 
-    mockConnection.query.mockResolvedValue([{ affectedRows: 1 }]);
+    // First query: idempotency SELECT (no existing record)
+    // Subsequent queries: UPDATE + INSERT for each ingredient
+    mockConnection.query
+      .mockResolvedValueOnce([[], []]) // SELECT: not processed yet
+      .mockResolvedValue([{ affectedRows: 1 }]); // UPDATE + INSERT calls
 
     const result = await processTransactionEvent(cdmPayload);
 
@@ -102,6 +110,9 @@ describe('3E. Stock Deduction Service', () => {
 
     resolveRecipe.mockResolvedValueOnce([]);
 
+    // First query: idempotency SELECT (no existing record)
+    mockConnection.query.mockResolvedValueOnce([[], []]);
+
     const result = await processTransactionEvent(cdmPayload);
 
     expect(result.success).toBe(true);
@@ -120,5 +131,31 @@ describe('3E. Stock Deduction Service', () => {
 
     expect(result.success).toBe(true);
     expect(result.deductions).toHaveLength(0);
+  });
+
+  test('processTransactionEvent skips already-processed transaction (idempotency)', async () => {
+    const cdmPayload = {
+      event_type: 'TRANSAKSI_SELESAI',
+      transaction_id: 'TXN-20260609-duplicate',
+      items: [{ menu_id: 'M001', menu_name: 'Steak', qty: 1, price: 50000 }],
+    };
+
+    // Idempotency SELECT returns existing record (already processed)
+    mockConnection.query.mockResolvedValueOnce([[{ id: 42 }], []]);
+
+    const result = await processTransactionEvent(cdmPayload);
+
+    expect(result.success).toBe(true);
+    expect(result.idempotent).toBe(true);
+    expect(result.deductions).toHaveLength(0);
+    expect(result.skipped).toHaveLength(0);
+    expect(result.transaction_id).toBe('TXN-20260609-duplicate');
+
+    // Should NOT have called resolveRecipe or any UPDATE/INSERT
+    expect(resolveRecipe).not.toHaveBeenCalled();
+    const updateCalls = mockConnection.query.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && (call[0].includes('UPDATE') || call[0].includes('INSERT'))
+    );
+    expect(updateCalls.length).toBe(0);
   });
 });

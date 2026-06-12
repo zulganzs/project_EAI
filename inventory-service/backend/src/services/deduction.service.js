@@ -5,11 +5,12 @@ const { resolveRecipe } = require('./recipe.service');
  * Process a TRANSAKSI_SELESAI CDM event and deduct stock from inventory.
  *
  * For each item in the CDM payload:
- *   1. Resolve the recipe (menu_id → list of ingredients with qty_per_menu)
- *   2. Calculate total qty to deduct per ingredient (qty_per_menu * menu_qty)
- *   3. Aggregate deductions if the same ingredient appears in multiple recipes
- *   4. Update stock_qty in the ingredients table
- *   5. Write an audit record to stock_movements
+ *   1. Check idempotency — skip if this transaction_id was already processed
+ *   2. Resolve the recipe (menu_id → list of ingredients with qty_per_menu)
+ *   3. Calculate total qty to deduct per ingredient (qty_per_menu * menu_qty)
+ *   4. Aggregate deductions if the same ingredient appears in multiple recipes
+ *   5. Update stock_qty in the ingredients table
+ *   6. Write an audit record to stock_movements
  *
  * @param {Object} cdmPayload - The CDM event from RabbitMQ
  * @returns {Object} Result with success, deductions, and skipped items
@@ -24,6 +25,15 @@ async function processTransactionEvent(cdmPayload) {
   const conn = await pool.getConnection();
 
   try {
+    // Idempotency check: skip if this transaction was already processed
+    const [existing] = await conn.query(
+      'SELECT id FROM stock_movements WHERE transaction_id = ? LIMIT 1',
+      [transaction_id]
+    );
+    if (existing.length > 0) {
+      return { success: true, deductions: [], skipped: [], transaction_id, idempotent: true };
+    }
+
     // Step 1: Collect all ingredient requirements across all menu items
     const ingredientMap = new Map(); // ingredient_id -> { ingredient_name, total_qty, unit }
     const skipped = [];
@@ -38,10 +48,10 @@ async function processTransactionEvent(cdmPayload) {
 
       for (const ri of recipeIngredients) {
         const qtyNeeded = ri.qty_per_menu * item.qty;
-        const existing = ingredientMap.get(ri.ingredient_id);
+        const existingIng = ingredientMap.get(ri.ingredient_id);
 
-        if (existing) {
-          existing.total_qty += qtyNeeded;
+        if (existingIng) {
+          existingIng.total_qty += qtyNeeded;
         } else {
           ingredientMap.set(ri.ingredient_id, {
             ingredient_id: ri.ingredient_id,

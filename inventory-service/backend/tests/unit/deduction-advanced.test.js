@@ -43,7 +43,11 @@ describe('3E. Stock Deduction — Advanced', () => {
       { ingredient_id: 2, ingredient_name: 'Kentang', qty_per_menu: 0.5, unit: 'kg' },
     ]);
 
-    mockConnection.query.mockResolvedValue([{ affectedRows: 1 }]);
+    // First query: idempotency SELECT (no existing record)
+    // Subsequent queries: UPDATE + INSERT
+    mockConnection.query
+      .mockResolvedValueOnce([[], []]) // SELECT: not processed yet
+      .mockResolvedValue([{ affectedRows: 1 }]); // UPDATE + INSERT calls
 
     const result = await processTransactionEvent(cdmPayload);
 
@@ -64,12 +68,16 @@ describe('3E. Stock Deduction — Advanced', () => {
       { ingredient_id: 1, ingredient_name: 'Daging Sapi', qty_per_menu: 0.5, unit: 'kg' },
     ]);
 
-    mockConnection.query.mockResolvedValue([{ affectedRows: 1 }]);
+    // First query: idempotency SELECT (no existing record)
+    // Subsequent queries: UPDATE + INSERT
+    mockConnection.query
+      .mockResolvedValueOnce([[], []]) // SELECT: not processed yet
+      .mockResolvedValue([{ affectedRows: 1 }]); // UPDATE + INSERT
 
     await processTransactionEvent(cdmPayload);
 
     const auditCalls = mockConnection.query.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].includes('stock_movements'),
+      (call) => typeof call[0] === 'string' && call[0].includes('stock_movements') && !call[0].trim().toUpperCase().startsWith('SELECT'),
     );
     expect(auditCalls.length).toBe(1);
     expect(auditCalls[0][1]).toEqual(
@@ -93,7 +101,11 @@ describe('3E. Stock Deduction — Advanced', () => {
       { ingredient_id: 1, ingredient_name: 'Daging Sapi', qty_per_menu: 0.5, unit: 'kg' },
     ]);
 
-    mockConnection.query.mockRejectedValueOnce(new Error('DB connection lost'));
+    // First query: idempotency SELECT (no existing record)
+    // Second query: UPDATE fails
+    mockConnection.query
+      .mockResolvedValueOnce([[], []]) // SELECT: not processed yet
+      .mockRejectedValueOnce(new Error('DB connection lost'));
 
     const result = await processTransactionEvent(cdmPayload);
 
