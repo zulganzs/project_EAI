@@ -481,9 +481,7 @@ project_EAI/
 │   ├── backend/                         # CRM Backend (Node/Express/MySQL)
 │   └── frontend/                        # CRM Reservations UI (React + Vite)
 ├── dashboard/                           # Unified Dashboard (POS + Inventory + CRM tabs)
-├── tests/                               # E2E + Docker validation tests
-└── docs/
-    └── superpowers/plans/               # Master plan & design documents
+└── tests/                               # E2E + Docker validation tests
 ```
 
 ---
