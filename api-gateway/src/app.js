@@ -1,9 +1,10 @@
 const express = require('express');
 const { posProxy, inventoryProxy, crmProxy, accountingProxy } = require('./middleware/proxy');
+const { globalLimiter, writeLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
-// Health check (no body parsing needed)
+// Health check (no body parsing or rate limiting needed)
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -11,6 +12,10 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Rate limiting — applied before proxying
+app.use('/api', globalLimiter);
+app.use('/api', writeLimiter);
 
 // Content-Based Router — proxy routes MUST be before express.json()
 // to avoid consuming the request body before forwarding
