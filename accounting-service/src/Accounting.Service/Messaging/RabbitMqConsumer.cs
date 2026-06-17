@@ -33,55 +33,71 @@ public class RabbitMqConsumer : BackgroundService
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
-        await InitializeRabbitMqAsync();
+        await InitializeRabbitMqWithRetryAsync(cancellationToken);
         await base.StartAsync(cancellationToken);
+    }
+
+    private async Task InitializeRabbitMqWithRetryAsync(CancellationToken cancellationToken)
+    {
+        var maxAttempts = 10;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await InitializeRabbitMqAsync();
+                return; // Success
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("RabbitMQ connection attempt {Attempt}/{Max} failed: {Message}", attempt, maxAttempts, ex.Message);
+                if (attempt == maxAttempts)
+                {
+                    _logger.LogError(ex, "Failed to connect to RabbitMQ after {Max} attempts", maxAttempts);
+                    return;
+                }
+                await Task.Delay(3000, cancellationToken);
+            }
+        }
     }
 
     private async Task InitializeRabbitMqAsync()
     {
-        try
+        var factory = new ConnectionFactory
         {
-            var factory = new ConnectionFactory
-            {
-                HostName = _settings.HostName,
-                Port = _settings.Port,
-                UserName = _settings.UserName,
-                Password = _settings.Password
-            };
+            HostName = _settings.HostName,
+            Port = _settings.Port,
+            UserName = _settings.UserName,
+            Password = _settings.Password
+        };
 
-            _connection = await factory.CreateConnectionAsync();
-            _channel = await _connection.CreateChannelAsync();
+        _connection = await factory.CreateConnectionAsync();
+        _channel = await _connection.CreateChannelAsync();
 
-            // Set up DLQ Exchange and Queue
-            var dlqExchange = $"{_settings.ExchangeName}.dlq";
-            await _channel.ExchangeDeclareAsync(dlqExchange, ExchangeType.Topic, durable: true);
-            await _channel.QueueDeclareAsync(_settings.DlqName, durable: true, exclusive: false, autoDelete: false);
-            await _channel.QueueBindAsync(_settings.DlqName, dlqExchange, _settings.RoutingKey);
+        // Set up DLQ Exchange and Queue
+        var dlqExchange = $"{_settings.ExchangeName}.dlq";
+        await _channel.ExchangeDeclareAsync(dlqExchange, ExchangeType.Topic, durable: true);
+        await _channel.QueueDeclareAsync(_settings.DlqName, durable: true, exclusive: false, autoDelete: false);
+        await _channel.QueueBindAsync(_settings.DlqName, dlqExchange, _settings.RoutingKey);
 
-            // Set up Main Exchange and Queue with DLQ arguments
-            await _channel.ExchangeDeclareAsync(_settings.ExchangeName, ExchangeType.Topic, durable: true);
-            var queueArgs = new Dictionary<string, object?>
-            {
-                { "x-dead-letter-exchange", dlqExchange },
-                { "x-dead-letter-routing-key", _settings.RoutingKey }
-            };
-
-            await _channel.QueueDeclareAsync(
-                queue: _settings.QueueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: queueArgs);
-            await _channel.QueueBindAsync(_settings.QueueName, _settings.ExchangeName, _settings.RoutingKey);
-
-            await _channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false);
-
-            _logger.LogInformation("RabbitMQ initialized successfully. Listening on {QueueName}", _settings.QueueName);
-        }
-        catch (Exception ex)
+        // Set up Main Exchange and Queue with DLQ arguments
+        await _channel.ExchangeDeclareAsync(_settings.ExchangeName, ExchangeType.Topic, durable: true);
+        var queueArgs = new Dictionary<string, object?>
         {
-            _logger.LogError(ex, "Failed to initialize RabbitMQ connection");
-        }
+            { "x-dead-letter-exchange", dlqExchange },
+            { "x-dead-letter-routing-key", _settings.RoutingKey }
+        };
+
+        await _channel.QueueDeclareAsync(
+            queue: _settings.QueueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: queueArgs);
+        await _channel.QueueBindAsync(_settings.QueueName, _settings.ExchangeName, _settings.RoutingKey);
+
+        await _channel.BasicQosAsync(prefetchSize: 0, prefetchCount: 1, global: false);
+
+        _logger.LogInformation("RabbitMQ initialized successfully. Listening on {QueueName}", _settings.QueueName);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

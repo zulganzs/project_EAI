@@ -14,7 +14,7 @@ public class RabbitMqSettings
     public string Password { get; set; } = "guest";
     public string ExchangeName { get; set; } = "flowca.events";
     public string QueueName { get; set; } = "accounting.transactions";
-    public string RoutingKey { get; set; } = "TRANSAKSI_SELESAI";
+    public string RoutingKey { get; set; } = "transaction.completed";
     public string DlqName { get; set; } = "accounting.transactions.dlq";
     public int MaxRetries { get; set; } = 3;
 }

@@ -11,9 +11,13 @@ builder.Configuration.AddEnvironmentVariables();
 // Bind settings
 var appSettings = new AppSettings();
 appSettings.RabbitMq.HostName = Environment.GetEnvironmentVariable("RABBITMQ_HOSTNAME") ?? appSettings.RabbitMq.HostName;
+appSettings.RabbitMq.Port = int.TryParse(Environment.GetEnvironmentVariable("RABBITMQ_PORT"), out var port) ? port : appSettings.RabbitMq.Port;
+appSettings.RabbitMq.UserName = Environment.GetEnvironmentVariable("RABBITMQ_USERNAME") ?? appSettings.RabbitMq.UserName;
+appSettings.RabbitMq.Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD") ?? appSettings.RabbitMq.Password;
 appSettings.RabbitMq.ExchangeName = Environment.GetEnvironmentVariable("RABBITMQ_EXCHANGE") ?? appSettings.RabbitMq.ExchangeName;
 appSettings.RabbitMq.QueueName = Environment.GetEnvironmentVariable("RABBITMQ_QUEUE") ?? appSettings.RabbitMq.QueueName;
 appSettings.RabbitMq.RoutingKey = Environment.GetEnvironmentVariable("RABBITMQ_ROUTING_KEY") ?? appSettings.RabbitMq.RoutingKey;
+appSettings.RabbitMq.DlqName = Environment.GetEnvironmentVariable("RABBITMQ_DLQ") ?? appSettings.RabbitMq.DlqName;
 appSettings.DatabaseConnectionString = Environment.GetEnvironmentVariable("DATABASE_CONNECTION_STRING") ?? appSettings.DatabaseConnectionString;
 
 builder.Services.Configure<AppSettings>(options =>
