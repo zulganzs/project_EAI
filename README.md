@@ -1,53 +1,50 @@
 # FlowCA — Enterprise Application Integration (EAI)
 
-FlowCA is a restaurant management system built with **event-driven microservices** using RabbitMQ choreography. POS transactions automatically trigger inventory stock deductions and accounting journal entries — no direct service-to-service calls needed.
+FlowCA adalah sistem manajemen restoran yang dibangun dengan **arsitektur microservices** menggunakan koreografi RabbitMQ. Transaksi POS secara otomatis memicu pengurangan stok inventaris dan entri jurnal akuntansi. Reservasi CRM terintegrasi dengan kasir POS untuk alur pembayaran hingga pemesanan meja yang lancar.
 
-Built with **Test-Driven Development (TDD)** — 306+ tests across all services.
 
 ---
 
 ## Architecture
 
 ```
-                          ┌─────────────────────────┐
-                          │    API Gateway :3000     │
-                          │  (Content-Based Router)  │
-                          └─┬─────┬─────┬─────┬─────┘
-                            │     │     │     │
-                         /api/pos /api/ /api/ /api/
-                          │     inv.  crm  acct.
-                            │     │     │     │
-                   ┌────────▼──┐  │  ┌──▼────────┐  ┌──────────────┐
-                   │POS Backend│  │  │CRM Backend │  │Accounting    │
-                   │  :3001    │  │  │  :3003     │  │(C# .NET):5000│
-                   └─────┬─────┘  │  └─────┬─────┘  └──────┬───────┘
-                         │        │        │                │
-                    ┌────▼────┐   │   ┌────▼─────┐   ┌─────▼──────┐
-                    │ MySQL   │   │   │  MySQL   │   │  SQLite    │
-                    │(POS DB) │   │   │(CRM DB)  │   │(Accounting)│
-                    └─────────┘   │   └──────────┘   └────────────┘
-                         │        │
-                  Publishes       │
-                  TRANSAKSI_      │
-                  SELESAI         ▼
-                  ──────> RabbitMQ (flowca.events)
-                            │     │
-                            ▼     ▼
-                   ┌──────────────┐  ┌──────────────┐
-                   │  Inventory   │  │  Accounting  │
-                   │  (Node :3002)│  │  (C# :5000)  │
-                   └──────┬───────┘  └──────────────┘
-                          │
-                    ┌─────▼──────┐
-                    │   MySQL    │
-                    │(Inventory) │
-                    └────────────┘
+                    ┌────────────────────────────────────────────┐
+                    │         INTERNAL DOCKER NETWORK             │
+                    │                                            │
+                    │   ┌─────────────────────────┐             │
+                    │   │    API Gateway :3000     │             │
+                    │   │  (Content-Based Router)  │             │
+                    │   │  + Rate Limiter          │             │
+                    │   └─┬─────┬─────┬─────┬─────┘             │
+                    │     │     │     │     │                    │
+                    │  /api/  /api/ /api/ /api/                  │
+                    │   pos   inv.  crm  acct.                   │
+                    │     │     │     │     │                    │
+                    │  ┌──▼───┐ ┌──▼───┐ ┌──▼───┐ ┌─────▼─────┐│
+                    │  │ POS  │ │Inven-│ │ CRM  │ │Accounting ││
+                    │  │:3001 │ │tory  │ │:3003 │ │(C#) :5000 ││
+                    │  └──┬───┘ │:3002 │ └──┬───┘ └─────┬─────┘│
+                    │     │     └──┬───┘    │           │      │
+                    │  ┌──▼───┐ ┌──▼───┐ ┌──▼───┐ ┌────▼────┐ │
+                    │  │MySQL │ │MySQL │ │MySQL │ │ SQLite  │ │
+                    │  │POS DB│ │Inv DB│ │CRMDB │ │Acct. DB │ │
+                    │  └──────┘ └──────┘ └──────┘ └─────────┘ │
+                    │                                            │
+                    │     POS publishes ──► RabbitMQ             │
+                    │                      (flowca.events)       │
+                    │                         │    │             │
+                    │                         ▼    ▼             │
+                    │                    Inventory  Accounting   │
+                    │                    (deduct)   (journal)    │
+                    └────────────────────────────────────────────┘
 
-  Frontends (React 18 + Vite 5):
-  ┌─────────────┐ ┌──────────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────┐
-  │POS Cashier  │ │Inventory Dash│ │CRM Reserv.│ │Accounting │ │  Dashboard   │
-  │  :9080      │ │  :9081       │ │  :9082    │ │  :9083    │ │  :5174       │
-  └─────────────┘ └──────────────┘ └───────────┘ └───────────┘ └──────────────┘
+                    ┌────────────────────────────────────────────┐
+                    │           EXPOSED TO HOST                   │
+                    ├────────────────────────────────────────────┤
+                    │  :5174  Dashboard (POS + Inventory + CRM)  │
+                    │  :9083  Accounting Frontend                 │
+                    │  :15672 RabbitMQ Management UI              │
+                    └────────────────────────────────────────────┘
 ```
 
 ---
@@ -60,10 +57,48 @@ Built with **Test-Driven Development (TDD)** — 306+ tests across all services.
 | **Inventory Backend** | Node.js, Express, MySQL 8.0 |
 | **Accounting Backend** | C# .NET 10.0, EF Core, SQLite |
 | **CRM Backend** | Node.js, Express, MySQL 8.0 |
-| **API Gateway** | Node.js, Express, http-proxy-middleware |
+| **API Gateway** | Node.js, Express, http-proxy-middleware, express-rate-limit |
 | **Message Broker** | RabbitMQ 3 (with Management UI) |
-| **All Frontends** | React 18, Vite 5, Axios |
+| **Dashboard** | React 18, Vite 5, Axios |
+| **Accounting Frontend** | React 18, Vite 5, Axios |
 | **Containerization** | Docker, Docker Compose |
+
+---
+
+## Microservices Design
+
+### Network Isolation
+
+All backends, databases, and the API gateway are **internal-only** — no ports exposed to the host machine. External access is limited to:
+
+| Port | Service | Purpose |
+|------|---------|---------|
+| `5174` | Dashboard | Unified UI (POS + Inventory + CRM) |
+| `9083` | Accounting Frontend | Journal entries + CSV export |
+| `15672` | RabbitMQ Management | Admin monitoring |
+
+### Service Communication Patterns
+
+| Pattern | Used By | Description |
+|---------|---------|-------------|
+| **API Gateway (Content-Based Router)** | Dashboard, Accounting Frontend | Single entry point routing by URL prefix |
+| **Event-Driven (Pub/Sub via RabbitMQ)** | POS → Inventory, POS → Accounting | Asynchronous choreography |
+| **Synchronous REST (via Gateway)** | POS → CRM | POS fetches reservations and completes them through the API Gateway |
+| **Rate Limiting** | API Gateway | 100 req/15min global, 30 writes/15min per IP |
+
+### POS ↔ CRM Integration Flow
+
+```
+1. CRM creates reservation (customer_name, table_number, status=BOOKED)
+2. POS Dashboard shows reserved tables (fetched from CRM via API Gateway)
+3. Cashier selects a reserved table → customer name auto-fills
+4. Cashier adds items and submits payment
+5. POS creates transaction (with reservation_id + table_number linked)
+6. POS calls CRM via API Gateway → marks reservation as COMPLETED
+7. POS publishes TRANSAKSI_SELESAI event to RabbitMQ (unchanged)
+   └─ Inventory deducts stock
+   └─ Accounting creates journal entry
+```
 
 ---
 
@@ -90,7 +125,7 @@ Defaults work out of the box — no editing needed.
 docker compose up -d --build
 ```
 
-This starts **15 containers**: RabbitMQ, 3 MySQL instances, 4 backends, 5 frontends, API Gateway.
+This starts **12 containers**: RabbitMQ, 3 MySQL instances, 4 backends, API Gateway, Dashboard, Accounting Frontend.
 
 > First run takes ~3-5 minutes (pulling base images + building .NET 10.0 SDK).
 
@@ -100,8 +135,8 @@ This starts **15 containers**: RabbitMQ, 3 MySQL instances, 4 backends, 5 fronte
 # Check all containers are running
 docker compose ps
 
-# Test gateway health
-curl http://localhost:3000/health
+# Test via dashboard
+open http://localhost:5174
 ```
 
 ### 4. Open the UIs
@@ -109,9 +144,6 @@ curl http://localhost:3000/health
 | UI | URL | Description |
 |----|-----|-------------|
 | **Unified Dashboard** | http://localhost:5174 | POS + Inventory + CRM in one page |
-| **POS Cashier** | http://localhost:9080 | Standalone cashier terminal |
-| **Inventory Dashboard** | http://localhost:9081 | Stock management |
-| **CRM Reservations** | http://localhost:9082 | Table reservations |
 | **Accounting** | http://localhost:9083 | Journal entries + CSV export |
 | **RabbitMQ Management** | http://localhost:15672 | Message broker UI (guest/guest) |
 
@@ -119,24 +151,37 @@ curl http://localhost:3000/health
 
 ```bash
 docker compose down        # Stop (keep data)
-docker compose down -v     # Stop + delete all data
+docker compose down -v     # Stop + delete all data (reset DBs)
 ```
 
 ---
 
 ## System Overview
 
-### POS Service (Event Producer)
+### POS Service (Event Producer + CRM Integration)
 
-Creates transactions and publishes `TRANSAKSI_SELESAI` events to RabbitMQ.
+Creates transactions and publishes `TRANSAKSI_SELESAI` events to RabbitMQ. Integrates with CRM to link transactions to reservations.
 
 | Method | Gateway Endpoint | Description |
 |--------|-----------------|-------------|
 | `POST` | `/api/pos/transactions` | Create a new transaction |
 | `GET` | `/api/pos/transactions/:id` | Get transaction by ID |
-| `GET` | `/health` | POS backend health check |
+| `GET` | `/api/pos/reserved-tables` | Get BOOKED reservations from CRM |
 
-**POST request body:**
+**POST request body (with reservation):**
+
+```json
+{
+  "customer_name": "John Doe",
+  "reservation_id": "RSV-20260610-a1b2",
+  "table_number": 5,
+  "items": [
+    { "menu_id": "M001", "menu_name": "Steak", "qty": 2, "price": 50000 }
+  ]
+}
+```
+
+**POST request body (walk-in, no reservation):**
 
 ```json
 {
@@ -152,26 +197,12 @@ Creates transactions and publishes `TRANSAKSI_SELESAI` events to RabbitMQ.
 ```json
 {
   "transaction_id": "TXN-20260609-ab12",
-  "customer_name": "Walk-in Customer",
+  "customer_name": "John Doe",
+  "reservation_id": "RSV-20260610-a1b2",
+  "table_number": 5,
   "total_amount": 100000,
   "currency": "IDR",
   "trace_id": "trace-pos-ab12cd34",
-  "items": [
-    { "menu_id": "M001", "menu_name": "Steak", "qty": 2, "price": 50000, "subtotal": 100000 }
-  ]
-}
-```
-
-**GET response:**
-
-```json
-{
-  "transaction_id": "TXN-20260609-ab12",
-  "customer_name": "Walk-in Customer",
-  "total_amount": 100000,
-  "currency": "IDR",
-  "trace_id": "trace-pos-ab12cd34",
-  "created_at": "2026-06-09T10:30:00.000Z",
   "items": [
     { "menu_id": "M001", "menu_name": "Steak", "qty": 2, "price": 50000, "subtotal": 100000 }
   ]
@@ -198,73 +229,27 @@ Subscribes to `TRANSAKSI_SELESAI` events, resolves recipes (Bill of Materials), 
 | `GET` | `/api/inventory/ingredients` | List all ingredients with stock |
 | `POST` | `/api/inventory/ingredients` | Add a new ingredient |
 | `PATCH` | `/api/inventory/ingredients/:id` | Update ingredient stock |
-| `GET` | `/health` | Inventory backend health check |
 
-**GET response — list of ingredients:**
+**Automatic stock deduction on transaction:**
 
-```json
-[
-  {
-    "id": 1,
-    "name": "Daging Sapi",
-    "unit": "gram",
-    "stock_qty": 5000,
-    "updated_at": "2026-06-09T10:30:00.000Z"
-  }
-]
-```
+When a POS transaction includes menu items with recipes, stock is automatically deducted:
 
-**POST request body:**
+- Steak (M001): Daging Sapi 0.5kg + Kentang 0.3kg
+- Nasi Goreng (M002): Beras 0.2kg + Telur 2 butir + Minyak Goreng 0.05L + Bawang Merah 20g + Kecap Manis 30ml
 
-```json
-{
-  "name": "Garam",
-  "unit": "gram",
-  "stock_qty": 1000
-}
-```
-
-**POST response (201):**
-
-```json
-{
-  "id": 10,
-  "name": "Garam",
-  "unit": "gram",
-  "stock_qty": 1000
-}
-```
-
-**PATCH request body:**
-
-```json
-{ "stock_qty": 500 }
-```
-
-**PATCH response:**
-
-```json
-{
-  "id": 10,
-  "name": "Garam",
-  "unit": "gram",
-  "stock_qty": 500,
-  "updated_at": "2026-06-09T12:00:00.000Z"
-}
-```
+Items without recipes (drinks D001, D002) are skipped.
 
 ---
 
 ### CRM Service (Reservations)
 
-Manages table reservations with status tracking.
+Manages table reservations with status tracking. Integrates with POS — reservations are auto-completed when payment is made.
 
 | Method | Gateway Endpoint | Description |
 |--------|-----------------|-------------|
 | `GET` | `/api/crm/reservations` | List all reservations |
 | `POST` | `/api/crm/reservations` | Create a reservation |
 | `PATCH` | `/api/crm/reservations/:id` | Update reservation status |
-| `GET` | `/health` | CRM backend health check |
 
 **POST request body:**
 
@@ -278,112 +263,55 @@ Manages table reservations with status tracking.
 }
 ```
 
-**POST response (201):**
-
-```json
-{
-  "reservation_id": "RSV-20260610-a1b2",
-  "customer_name": "John Doe",
-  "phone": "081234567890",
-  "party_size": 4,
-  "reservation_time": "2026-06-10T19:00:00Z",
-  "table_number": 5,
-  "status": "BOOKED"
-}
-```
-
-**PATCH request body:**
-
-```json
-{ "status": "COMPLETED" }
-```
-
 Valid statuses: `BOOKED` → `COMPLETED` or `CANCELLED`
-
-**GET response — list of reservations:**
-
-```json
-[
-  {
-    "reservation_id": "RSV-20260610-a1b2",
-    "customer_name": "John Doe",
-    "phone": "081234567890",
-    "party_size": 4,
-    "reservation_time": "2026-06-10T19:00:00.000Z",
-    "table_number": 5,
-    "status": "BOOKED",
-    "created_at": "2026-06-10T18:00:00.000Z"
-  }
-]
-```
 
 ---
 
 ### Accounting Service (Event Subscriber — C# .NET)
 
-Subscribes to `TRANSAKSI_SELESAI` events, transforms JSON to CSV, enforces idempotency, and writes double-entry journal entries. Failed messages go to a Dead Letter Queue (DLQ) with retry.
+Subscribes to `TRANSAKSI_SELESAI` events, transforms JSON to CSV, enforces idempotency, and writes journal entries. Failed messages go to a Dead Letter Queue (DLQ) with retry.
 
 | Method | Gateway Endpoint | Description |
 |--------|-----------------|-------------|
 | `GET` | `/api/accounting/journal-entries` | List all journal entries |
-| `GET` | `/api/accounting/journal-entries/:id` | Get journal entry by ID |
-| `GET` | `/api/accounting/journal-entries/transaction/:txId` | Get entries by transaction ID |
-| `GET` | `/api/accounting/processed-transactions` | List all processed (idempotent) transactions |
-| `GET` | `/api/accounting/health` | Accounting service health check |
-
-**GET `/api/accounting/journal-entries` response:**
-
-```json
-[
-  {
-    "id": 1,
-    "transactionId": "TXN-20260609-ab12",
-    "amount": 100000.0,
-    "currency": "IDR",
-    "type": "SALES_REVENUE",
-    "accountCode": "REV-100",
-    "createdAt": "2026-06-09T10:30:00.000Z",
-    "csvPayload": "transaction_id,timestamp,total_amount,currency,type\nTXN-20260609-ab12,2026-06-09T10:30:00.000Z,100000,IDR,SALES_REVENUE"
-  }
-]
-```
-
-The `csvPayload` field is used by the Accounting Frontend for one-click CSV export.
+| `GET` | `/api/accounting/processed-transactions` | List processed transactions |
 
 ---
 
-### API Gateway (Content-Based Router)
+### API Gateway (Content-Based Router + Rate Limiter)
 
-Single entry point for all clients. Routes requests based on URL path prefix.
+Single entry point for Dashboard and Accounting Frontend. Routes requests based on URL path prefix. Includes rate limiting to prevent abuse.
 
 | Gateway Path | Routes To | Service |
 |---|---|---|
-| `/api/pos/*` | `POS_BASE_URL` (`:3001`) | POS Backend |
-| `/api/inventory/*` | `INVENTORY_BASE_URL` (`:3002`) | Inventory Backend |
-| `/api/crm/*` | `CRM_BASE_URL` (`:3003`) | CRM Backend |
-| `/api/accounting/*` | `ACCOUNTING_BASE_URL` (`:5000`) | Accounting Backend |
-| `/health` | — | Gateway itself |
-| `/api/*` (other) | — | 404 Not Found |
+| `/api/pos/*` | `http://pos-backend:3001` | POS Backend |
+| `/api/inventory/*` | `http://inventory-backend:3002` | Inventory Backend |
+| `/api/crm/*` | `http://crm-backend:3003` | CRM Backend |
+| `/api/accounting/*` | `http://accounting-service:5000` | Accounting Backend |
 
-> Accounting path rewrite: `/api/accounting/journal-entries` → `/api/journal-entries`
+**Rate Limits:**
+- Global: 100 requests per IP per 15 minutes
+- Writes (POST/PATCH/PUT/DELETE): 30 requests per IP per 15 minutes
 
 ---
 
 ### Event Flow (Choreography Pattern)
 
 ```
-1. Cashier creates transaction via POS
+1. Cashier selects reserved table (or walk-in) and creates transaction
    └─ POST /api/pos/transactions
 
-2. POS saves to MySQL, publishes event to RabbitMQ
+2. POS saves to MySQL (with reservation_id if linked)
+   └─ If reservation linked: PATCH /api/crm/reservations/:id → COMPLETED
+
+3. POS publishes event to RabbitMQ
    └─ Exchange: flowca.events | Key: transaction.completed
 
-3a. Inventory subscriber receives event
+4a. Inventory subscriber receives event
     └─ Resolves recipe (BOM) → Deducts stock → Writes audit log
 
-3b. Accounting subscriber receives event
+4b. Accounting subscriber receives event (with retry + DLQ)
     └─ Checks idempotency → Transforms JSON→CSV → Writes journal entry
-    └─ On failure: retries via DLQ
 ```
 
 **Canonical Data Model (CDM) — the event contract:**
@@ -404,59 +332,19 @@ Single entry point for all clients. Routes requests based on URL path prefix.
 
 ---
 
-## Quick API Tests
+## EAI Patterns Implemented
 
-```bash
-# Gateway health
-curl http://localhost:3000/health
-
-# Create a POS transaction (triggers inventory + accounting)
-curl -X POST http://localhost:3000/api/pos/transactions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_name": "Test Customer",
-    "items": [
-      { "menu_id": "M001", "menu_name": "Steak", "qty": 2, "price": 50000 }
-    ]
-  }'
-
-# Check ingredients (stock deducted automatically)
-curl http://localhost:3000/api/inventory/ingredients
-
-# Check journal entries (accounted automatically)
-curl http://localhost:3000/api/accounting/journal-entries
-
-# Create a CRM reservation
-curl -X POST http://localhost:3000/api/crm/reservations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_name": "John Doe",
-    "party_size": 4,
-    "reservation_time": "2026-06-10T19:00:00Z"
-  }'
-```
-
----
-
-## Ports Reference
-
-| Service | Port | URL |
-|---------|------|-----|
-| **API Gateway** | 3000 | http://localhost:3000 |
-| POS Backend | 3001 | http://localhost:3001 |
-| Inventory Backend | 3002 | http://localhost:3002 |
-| CRM Backend | 3003 | http://localhost:3003 |
-| Accounting Backend | 5001 | http://localhost:5001 |
-| RabbitMQ AMQP | 5672 | amqp://localhost:5672 |
-| RabbitMQ Management | 15672 | http://localhost:15672 |
-| POS MySQL | 3306 | localhost:3306 |
-| Inventory MySQL | 3307 | localhost:3307 |
-| CRM MySQL | 3308 | localhost:3308 |
-| **Unified Dashboard** | 5174 | http://localhost:5174 |
-| POS Frontend | 9080 | http://localhost:9080 |
-| Inventory Frontend | 9081 | http://localhost:9081 |
-| CRM Frontend | 9082 | http://localhost:9082 |
-| Accounting Frontend | 9083 | http://localhost:9083 |
+| Pattern | Implementation |
+|---------|---------------|
+| **Content-Based Router** | API Gateway routes by URL prefix |
+| **Message Broker** | RabbitMQ (topic exchange, durable queues) |
+| **Publish-Subscribe** | POS publishes → Inventory + Accounting subscribe |
+| **Canonical Data Model** | Standardized `TRANSAKSI_SELESAI` event schema |
+| **Idempotent Receiver** | Both Inventory and Accounting check for duplicate processing |
+| **Dead Letter Queue** | Accounting DLQ for failed message retry |
+| **Message Translator** | Accounting transforms JSON → CSV |
+| **Wire Tap** | Stock movements audit log in Inventory |
+| **Rate Limiting** | API Gateway throttles requests per IP |
 
 ---
 
@@ -464,24 +352,30 @@ curl -X POST http://localhost:3000/api/crm/reservations \
 
 ```
 project_EAI/
-├── .env.example                         # Shared environment configuration
-├── docker-compose.yml                   # Full stack orchestration (15 containers)
-├── api-gateway/                         # API Gateway (Express, Content-Based Router)
+├── .env                                 # Environment configuration
+├── docker-compose.yml                   # Full stack orchestration (12 containers)
+├── api-gateway/                         # API Gateway (Express + Rate Limiter)
 │   └── src/
+│       ├── config/routes.js             # Service URL configuration
+│       ├── middleware/proxy.js          # Proxy middlewares per service
+│       ├── middleware/rateLimiter.js    # Rate limiting middleware
+│       └── app.js                       # Route registration
 ├── pos-service/
-│   ├── backend/                         # POS Backend (Node/Express/MySQL/RabbitMQ publisher)
-│   └── frontend/                        # POS Cashier UI (React + Vite)
+│   └── backend/                         # POS Backend (Node/Express/MySQL/RabbitMQ)
+│       └── src/
+│           ├── services/crmClient.js    # CRM integration via API Gateway
+│           └── routes/transaction.routes.js
 ├── inventory-service/
-│   ├── backend/                         # Inventory Backend (Node/Express/MySQL/RabbitMQ subscriber)
-│   └── frontend/                        # Inventory Dashboard UI (React + Vite)
+│   └── backend/                         # Inventory Backend (Node/Express/MySQL/RabbitMQ)
+│       └── src/
+│           ├── services/deduction.service.js  # Stock deduction logic
+│           └── services/recipe.service.js     # Recipe/BOM resolver
 ├── accounting-service/
-│   ├── src/Accounting.Service/          # Accounting Backend (C# .NET 10.0/SQLite/RabbitMQ subscriber)
-│   └── frontend/                        # Accounting Dashboard UI (React + Vite)
+│   ├── src/Accounting.Service/          # Accounting Backend (C# .NET 10.0/SQLite/RabbitMQ)
+│   └── frontend/                        # Accounting Dashboard UI
 ├── crm-service/
-│   ├── backend/                         # CRM Backend (Node/Express/MySQL)
-│   └── frontend/                        # CRM Reservations UI (React + Vite)
-├── dashboard/                           # Unified Dashboard (POS + Inventory + CRM tabs)
-└── tests/                               # E2E + Docker validation tests
+│   └── backend/                         # CRM Backend (Node/Express/MySQL)
+└── dashboard/                           # Unified Dashboard (POS + Inventory + CRM)
 ```
 
 ---
@@ -491,33 +385,47 @@ project_EAI/
 ### Unit Tests (no Docker needed)
 
 ```bash
-cd pos-service/backend && npm test           # 45 tests
-cd inventory-service/backend && npm test     # 50 tests
-cd api-gateway && npm test                   # 24 tests
-cd crm-service/backend && npm test           # 27 tests
-cd accounting-service/src/Accounting.Service && dotnet test  # 34 tests
+cd pos-service/backend && npm test
+cd inventory-service/backend && npm test
+cd api-gateway && npm test
+cd crm-service/backend && npm test
 ```
 
-### Integration Tests (require MySQL on port 3307)
+### .NET Tests
 
 ```bash
-docker run -d --name test-mysql -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=test_db -p 3307:3306 mysql:8.0
-
-cd pos-service/backend && POS_DB_PORT=3307 POS_DB_NAME=pos_test_db npm run test:integration
-cd inventory-service/backend && INVENTORY_DB_PORT=3307 INVENTORY_DB_NAME=inventory_test_db npm run test:integration
-cd crm-service/backend && CRM_DB_PORT=3307 CRM_DB_NAME=crm_test_db npm run test:integration
-
-docker rm -f test-mysql
+cd accounting-service/tests/Accounting.Service.Tests && dotnet test
 ```
 
-### E2E Tests
+---
+
+## Troubleshooting
+
+### Services can't connect to RabbitMQ
+
+Both Inventory and Accounting services have built-in retry logic (10 attempts, 3s delay). If they still fail:
 
 ```bash
-npm run test:e2e
+docker compose restart inventory-backend accounting-service
+```
+
+### Reset all data
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+### Check service logs
+
+```bash
+docker compose logs pos-backend --tail 20
+docker compose logs inventory-backend --tail 20
+docker compose logs accounting-service --tail 20
 ```
 
 ---
 
 ## License
 
-This project is for educational purposes.
+This project is for educational purposes (Tugas Besar EAI — Semester 4 - Kelompok 1).
