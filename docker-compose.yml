@@ -55,11 +55,14 @@ services:
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE:-flowca.events}
       - RABBITMQ_ROUTING_KEY=${RABBITMQ_ROUTING_KEY:-transaction.completed}
+      - API_GATEWAY_URL=http://api-gateway:3000
     depends_on:
       pos-mysql:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      api-gateway:
+        condition: service_started
     restart: on-failure
 
 
@@ -216,9 +219,6 @@ services:
       - CRM_BASE_URL=http://crm-backend:3003
       - ACCOUNTING_BASE_URL=http://accounting-service:5000
     depends_on:
-      - pos-backend
-      - inventory-backend
-      - accounting-service
       - crm-backend
     restart: on-failure
 
