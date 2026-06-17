@@ -11,24 +11,36 @@ async function start() {
   initPool();
   console.log('[inventory] DB pool initialized');
 
-  // Connect to RabbitMQ and subscribe
-  try {
-    await connect();
-    console.log('[inventory] Connected to RabbitMQ');
+  // Connect to RabbitMQ and subscribe (with retry)
+  const maxAttempts = 10;
+  let connected = false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await connect();
+      console.log('[inventory] Connected to RabbitMQ');
 
-    await subscribe(async (cdmPayload) => {
-      console.log(`[inventory] Received ${cdmPayload.event_type} event for ${cdmPayload.transaction_id}`);
-      const result = await processTransactionEvent(cdmPayload);
-      if (result.success) {
-        console.log(`[inventory] Stock deducted: ${result.deductions.length} ingredients updated`);
-      } else {
-        console.error(`[inventory] Failed to process event: ${result.error}`);
+      await subscribe(async (cdmPayload) => {
+        console.log(`[inventory] Received ${cdmPayload.event_type} event for ${cdmPayload.transaction_id}`);
+        const result = await processTransactionEvent(cdmPayload);
+        if (result.success) {
+          console.log(`[inventory] Stock deducted: ${result.deductions.length} ingredients updated`);
+        } else {
+          console.error(`[inventory] Failed to process event: ${result.error}`);
+        }
+      });
+
+      console.log('[inventory] Subscribed to TRANSAKSI_SELESAI events');
+      connected = true;
+      break;
+    } catch (err) {
+      console.warn(`[inventory] RabbitMQ connection attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
       }
-    });
-
-    console.log('[inventory] Subscribed to TRANSAKSI_SELESAI events');
-  } catch (err) {
-    console.error('[inventory] RabbitMQ connection failed — running without subscriber:', err.message);
+    }
+  }
+  if (!connected) {
+    console.error('[inventory] RabbitMQ connection failed after all retries — running without subscriber');
   }
 
   // Start HTTP server

@@ -5,8 +5,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "15672:15672"   # Management UI only (admin monitoring)
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
@@ -20,7 +19,7 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
 
   # ============================================================
-  # POS Service (Node.js + MySQL)
+  # POS Service (Node.js + MySQL) — Self-contained microservice
   # ============================================================
   pos-mysql:
     image: mysql:8.0
@@ -36,15 +35,13 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
-    ports:
-      - "3306:3306"
+    # No external ports — only accessible within Docker network
 
   pos-backend:
     build:
       context: ./pos-service/backend
       dockerfile: Dockerfile
-    ports:
-      - "${POS_PORT:-3001}:3001"
+    # No external ports — accessed via pos-frontend nginx or api-gateway
     environment:
       - POS_PORT=3001
       - POS_DB_HOST=pos-mysql
@@ -58,25 +55,20 @@ services:
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
       - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE:-flowca.events}
       - RABBITMQ_ROUTING_KEY=${RABBITMQ_ROUTING_KEY:-transaction.completed}
+      - API_GATEWAY_URL=http://api-gateway:3000
     depends_on:
       pos-mysql:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      api-gateway:
+        condition: service_started
     restart: on-failure
 
-  pos-frontend:
-    build:
-      context: ./pos-service/frontend
-      dockerfile: Dockerfile
-    ports:
-      - "${POS_FRONTEND_PORT:-9080}:80"
-    depends_on:
-      - api-gateway
-    restart: on-failure
+
 
   # ============================================================
-  # Inventory Service (Node.js + MySQL)
+  # Inventory Service (Node.js + MySQL) — Self-contained microservice
   # ============================================================
   inventory-mysql:
     image: mysql:8.0
@@ -93,15 +85,13 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
-    ports:
-      - "3307:3306"
+    # No external ports — only accessible within Docker network
 
   inventory-backend:
     build:
       context: ./inventory-service/backend
       dockerfile: Dockerfile
-    ports:
-      - "${INVENTORY_PORT:-3002}:3002"
+    # No external ports — accessed via inventory-frontend nginx or api-gateway
     environment:
       - INVENTORY_PORT=3002
       - INVENTORY_DB_HOST=inventory-mysql
@@ -123,15 +113,7 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  inventory-frontend:
-    build:
-      context: ./inventory-service/frontend
-      dockerfile: Dockerfile
-    ports:
-      - "${INVENTORY_FRONTEND_PORT:-9081}:80"
-    depends_on:
-      - api-gateway
-    restart: on-failure
+
 
   # ============================================================
   # Accounting Service (C# .NET 10.0 + SQLite)
@@ -140,8 +122,7 @@ services:
     build:
       context: ./accounting-service/src/Accounting.Service
       dockerfile: Dockerfile
-    ports:
-      - "${ACCOUNTING_PORT:-5001}:5000"
+    # No external ports — accessed only via api-gateway
     environment:
       - ASPNETCORE_URLS=http://+:5000
       - RABBITMQ_HOSTNAME=rabbitmq
@@ -171,7 +152,7 @@ services:
     restart: on-failure
 
   # ============================================================
-  # CRM Service (Node.js + MySQL)
+  # CRM Service (Node.js + MySQL) — Self-contained microservice
   # ============================================================
   crm-mysql:
     image: mysql:8.0
@@ -187,15 +168,13 @@ services:
       timeout: 3s
       retries: 10
       start_period: 30s
-    ports:
-      - "3308:3306"
+    # No external ports — only accessible within Docker network
 
   crm-backend:
     build:
       context: ./crm-service/backend
       dockerfile: Dockerfile
-    ports:
-      - "${CRM_PORT:-3003}:3003"
+    # No external ports — accessed via crm-frontend nginx or api-gateway
     environment:
       - CRM_PORT=3003
       - CRM_DB_HOST=crm-mysql
@@ -208,18 +187,11 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  crm-frontend:
-    build:
-      context: ./crm-service/frontend
-      dockerfile: Dockerfile
-    ports:
-      - "${CRM_FRONTEND_PORT:-9082}:80"
-    depends_on:
-      - api-gateway
-    restart: on-failure
+
 
   # ============================================================
-  # Unified Dashboard (React + Vite → Nginx)
+  # Unified Dashboard (React + Vite → Nginx) — Integration layer
+  # Uses API Gateway to access all services
   # ============================================================
   dashboard:
     build:
@@ -227,21 +199,19 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5174:80"
-    environment:
-      - VITE_API_URL=http://api-gateway:3000
     depends_on:
       - api-gateway
     restart: on-failure
 
   # ============================================================
-  # API Gateway (Node.js)
+  # API Gateway (Node.js) — Integration/aggregation entry point
+  # Only used by Dashboard and Accounting frontend
   # ============================================================
   api-gateway:
     build:
       context: ./api-gateway
       dockerfile: Dockerfile
-    ports:
-      - "${GATEWAY_PORT:-3000}:3000"
+    # No external ports — accessed internally by dashboard & accounting-frontend nginx
     environment:
       - GATEWAY_PORT=3000
       - POS_BASE_URL=http://pos-backend:3001
@@ -249,9 +219,6 @@ services:
       - CRM_BASE_URL=http://crm-backend:3003
       - ACCOUNTING_BASE_URL=http://accounting-service:5000
     depends_on:
-      - pos-backend
-      - inventory-backend
-      - accounting-service
       - crm-backend
     restart: on-failure
 

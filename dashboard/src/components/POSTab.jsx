@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { createTransaction, getTransaction } from '../services/posApi';
+import { useState, useEffect } from 'react';
+import { createTransaction, getTransaction, getReservedTables } from '../services/posApi';
 
 const MENU_ITEMS = [
   { menu_id: 'M001', menu_name: 'Steak', price: 50000 },
@@ -20,6 +20,37 @@ export default function POSTab() {
   const [status, setStatus] = useState({ type: '', message: '' });
   const [lastTransaction, setLastTransaction] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Reservation integration
+  const [reservedTables, setReservedTables] = useState([]);
+  const [selectedReservation, setSelectedReservation] = useState(null);
+  const [loadingReservations, setLoadingReservations] = useState(false);
+
+  // Fetch reserved tables from CRM via POS backend
+  const fetchReservedTables = async () => {
+    setLoadingReservations(true);
+    try {
+      const data = await getReservedTables();
+      setReservedTables(data);
+    } catch (err) {
+      console.warn('Failed to fetch reserved tables:', err.message);
+      setReservedTables([]);
+    } finally {
+      setLoadingReservations(false);
+    }
+  };
+
+  useEffect(() => { fetchReservedTables(); }, []);
+
+  const handleSelectReservation = (reservation) => {
+    setSelectedReservation(reservation);
+    setCustomerName(reservation.customer_name);
+  };
+
+  const handleClearReservation = () => {
+    setSelectedReservation(null);
+    setCustomerName('');
+  };
 
   const addToCart = (menuItem) => {
     setCart((prev) => {
@@ -59,12 +90,28 @@ export default function POSTab() {
         customer_name: customerName.trim() || 'Walk-in Customer',
         items: cart.map(({ menu_id, menu_name, qty, price }) => ({ menu_id, menu_name, qty, price })),
       };
+
+      // Link reservation if selected
+      if (selectedReservation) {
+        payload.reservation_id = selectedReservation.reservation_id;
+        payload.table_number = selectedReservation.table_number;
+      }
+
       const result = await createTransaction(payload);
       const detail = await getTransaction(result.transaction_id);
       setLastTransaction(detail);
-      setStatus({ type: 'success', message: 'Berhasil! ID: ' + result.transaction_id });
+
+      const msg = selectedReservation
+        ? `Berhasil! ID: ${result.transaction_id} — Reservasi meja ${selectedReservation.table_number} selesai`
+        : `Berhasil! ID: ${result.transaction_id}`;
+      setStatus({ type: 'success', message: msg });
+
       setCart([]);
       setCustomerName('');
+      setSelectedReservation(null);
+
+      // Refresh reserved tables (the completed one should disappear)
+      fetchReservedTables();
     } catch (err) {
       setStatus({ type: 'error', message: 'Gagal: ' + (err.response?.data?.error || err.message) });
     } finally {
@@ -72,11 +119,55 @@ export default function POSTab() {
     }
   };
 
-  const handleClear = () => { setCart([]); setCustomerName(''); setStatus({ type: '', message: '' }); };
+  const handleClear = () => {
+    setCart([]);
+    setCustomerName('');
+    setSelectedReservation(null);
+    setStatus({ type: '', message: '' });
+  };
 
   return (
     <div style={s.wrapper}>
+      {/* Left column: Menu + Reserved Tables */}
       <div style={{ ...s.panel, flex: 1 }}>
+        {/* Reserved Tables Section */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h2 style={s.title}>Meja Reservasi</h2>
+            <button style={s.refreshBtn} onClick={fetchReservedTables} disabled={loadingReservations}>
+              {loadingReservations ? '...' : '↻'}
+            </button>
+          </div>
+          {reservedTables.length === 0 ? (
+            <div style={s.emptySmall}>Tidak ada meja yang direservasi saat ini.</div>
+          ) : (
+            <div style={s.tableGrid}>
+              {reservedTables.map((r) => (
+                <div
+                  key={r.reservation_id}
+                  onClick={() => handleSelectReservation(r)}
+                  style={{
+                    ...s.tableCard,
+                    borderColor: selectedReservation?.reservation_id === r.reservation_id ? '#1a73e8' : '#e8e8e8',
+                    backgroundColor: selectedReservation?.reservation_id === r.reservation_id ? '#e8f0fe' : '#fafafa',
+                  }}
+                >
+                  <div style={s.tableNumber}>Meja {r.table_number}</div>
+                  <div style={s.tableCustomer}>{r.customer_name}</div>
+                  <div style={s.tableParty}>{r.party_size} orang</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {selectedReservation && (
+            <div style={s.selectedBanner}>
+              <span>Melayani: <strong>{selectedReservation.customer_name}</strong> — Meja {selectedReservation.table_number}</span>
+              <button style={s.clearSelBtn} onClick={handleClearReservation}>✕</button>
+            </div>
+          )}
+        </div>
+
+        {/* Menu Section */}
         <h2 style={s.title}>Menu</h2>
         <div style={s.menuGrid}>
           {MENU_ITEMS.map((item) => (
@@ -90,13 +181,21 @@ export default function POSTab() {
           ))}
         </div>
       </div>
+
+      {/* Right column: Order */}
       <div style={{ ...s.panel, flex: 1 }}>
         <h2 style={s.title}>Pesanan</h2>
         <div style={{ marginBottom: 12 }}>
           <label style={s.label}>Nama Pelanggan:</label>
           <input type="text" placeholder="Walk-in Customer" value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)} style={s.input} />
+            onChange={(e) => { setCustomerName(e.target.value); if (selectedReservation) setSelectedReservation(null); }}
+            style={s.input} />
         </div>
+        {selectedReservation && (
+          <div style={s.reservationTag}>
+            🪑 Meja {selectedReservation.table_number} (Reservasi)
+          </div>
+        )}
         {cart.length === 0 ? (
           <div style={s.empty}>Belum ada item.</div>
         ) : (
@@ -142,6 +241,9 @@ export default function POSTab() {
             <h4 style={{ margin: '0 0 8px 0' }}>Transaksi Terakhir</h4>
             <div style={s.lastRow}><span>ID:</span><strong>{lastTransaction.transaction_id}</strong></div>
             <div style={s.lastRow}><span>Pelanggan:</span><span>{lastTransaction.customer_name}</span></div>
+            {lastTransaction.table_number && (
+              <div style={s.lastRow}><span>Meja:</span><span>{lastTransaction.table_number}</span></div>
+            )}
             <div style={s.lastRow}><span>Total:</span><strong>{formatRupiah(lastTransaction.total_amount)}</strong></div>
             <div style={s.lastRow}><span>Item:</span><span>{lastTransaction.items?.map((i) => i.menu_name + ' x' + i.qty).join(', ')}</span></div>
           </div>
@@ -163,6 +265,7 @@ const s = {
   label: { display: 'block', fontSize: '0.85rem', marginBottom: 4, color: '#555' },
   input: { width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: '0.9rem', boxSizing: 'border-box' },
   empty: { textAlign: 'center', color: '#999', padding: 24, fontStyle: 'italic' },
+  emptySmall: { textAlign: 'center', color: '#999', padding: 12, fontStyle: 'italic', fontSize: '0.85rem' },
   cartList: { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 },
   cartItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10, backgroundColor: '#f8f9fa', borderRadius: 8, border: '1px solid #e8e8e8' },
   qtyBtn: { width: 28, height: 28, border: '1px solid #ddd', borderRadius: 4, backgroundColor: 'white', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center' },
@@ -173,4 +276,14 @@ const s = {
   statusBox: { marginTop: 12, padding: '10px 14px', borderRadius: 8, fontSize: '0.9rem', fontWeight: 500 },
   lastBox: { marginTop: 16, padding: 12, backgroundColor: '#e8f0fe', borderRadius: 8, border: '1px solid #c5d8f0' },
   lastRow: { display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 4 },
+  // Reserved table styles
+  tableGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 },
+  tableCard: { padding: 10, borderRadius: 8, border: '2px solid', cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s' },
+  tableNumber: { fontWeight: 700, fontSize: '1rem', color: '#1a73e8' },
+  tableCustomer: { fontSize: '0.8rem', color: '#333', marginTop: 2 },
+  tableParty: { fontSize: '0.75rem', color: '#666' },
+  selectedBanner: { marginTop: 8, padding: '8px 12px', backgroundColor: '#e8f0fe', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', border: '1px solid #c5d8f0' },
+  clearSelBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', color: '#666' },
+  reservationTag: { marginBottom: 12, padding: '6px 12px', backgroundColor: '#fff3e0', borderRadius: 6, fontSize: '0.85rem', color: '#e65100', fontWeight: 500 },
+  refreshBtn: { width: 30, height: 30, border: '1px solid #ddd', borderRadius: 6, backgroundColor: 'white', cursor: 'pointer', fontSize: '1rem' },
 };

@@ -2,11 +2,13 @@ const crypto = require('crypto');
 const { generateTransactionId } = require('../utils/idGenerator');
 const { buildCDMPayload } = require('../services/transaction.service');
 const eventPublisher = require('../messaging/eventPublisher');
+const crmClient = require('../services/crmClient');
 
 /**
  * Create a new transaction, save to DB, and return the result.
+ * If reservation_id is provided, marks the CRM reservation as COMPLETED after success.
  * @param {Object} pool - The database pool module
- * @param {Object} body - Request body with customer_name and items
+ * @param {Object} body - Request body with customer_name, items, and optional reservation_id/table_number
  * @returns {Object} Created transaction data
  */
 async function createTransaction(pool, body) {
@@ -14,6 +16,8 @@ async function createTransaction(pool, body) {
     customer_name = 'Walk-in Customer',
     currency = 'IDR',
     items,
+    reservation_id = null,
+    table_number = null,
   } = body;
 
   // Generate IDs
@@ -30,11 +34,11 @@ async function createTransaction(pool, body) {
   // Save to database
   const conn = await pool.getConnection();
   try {
-    // Insert transaction header
+    // Insert transaction header (with reservation link if provided)
     await conn.query(
-      `INSERT INTO transactions (transaction_id, customer_name, total_amount, currency, trace_id)
-       VALUES (?, ?, ?, ?, ?)`,
-      [transaction_id, customer_name, total_amount, currency, trace_id]
+      `INSERT INTO transactions (transaction_id, customer_name, reservation_id, table_number, total_amount, currency, trace_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [transaction_id, customer_name, reservation_id, table_number, total_amount, currency, trace_id]
     );
 
     // Insert transaction items
@@ -46,9 +50,22 @@ async function createTransaction(pool, body) {
       );
     }
 
+    // If linked to a reservation, mark it as COMPLETED in CRM (fire-and-forget)
+    if (reservation_id) {
+      try {
+        await crmClient.completeReservation(reservation_id);
+        console.log(`[pos] Marked reservation ${reservation_id} as COMPLETED`);
+      } catch (crmErr) {
+        console.warn(`[pos] Failed to update CRM reservation: ${crmErr.message}`);
+        // Non-blocking — transaction is still valid even if CRM update fails
+      }
+    }
+
     return {
       transaction_id,
       customer_name,
+      reservation_id,
+      table_number,
       total_amount,
       currency,
       trace_id,
@@ -69,7 +86,7 @@ async function getTransaction(pool, id) {
   const conn = await pool.getConnection();
   try {
     const [rows] = await conn.query(
-      'SELECT transaction_id, customer_name, total_amount, currency, trace_id, created_at FROM transactions WHERE transaction_id = ?',
+      'SELECT transaction_id, customer_name, reservation_id, table_number, total_amount, currency, trace_id, created_at FROM transactions WHERE transaction_id = ?',
       [id]
     );
 

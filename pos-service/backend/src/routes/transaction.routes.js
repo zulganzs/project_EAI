@@ -3,6 +3,7 @@ const router = express.Router();
 const pool = require('../config/pool');
 const { createTransaction, getTransaction } = require('../controllers/transaction.controller');
 const { buildCDMPayload } = require('../services/transaction.service');
+const crmClient = require('../services/crmClient');
 const eventPublisher = require('../messaging/eventPublisher');
 
 /**
@@ -19,6 +20,17 @@ function validateTransaction(body) {
   }
   return null;
 }
+
+// GET /api/pos/reserved-tables — fetch BOOKED reservations from CRM via API Gateway
+router.get('/reserved-tables', async (_req, res) => {
+  try {
+    const reservations = await crmClient.getBookedReservations();
+    return res.status(200).json(reservations);
+  } catch (err) {
+    console.error(`[pos] Failed to fetch reserved tables: ${err.message}`);
+    return res.status(502).json({ error: 'Failed to fetch reservations from CRM' });
+  }
+});
 
 // POST /api/pos/transactions
 router.post('/transactions', async (req, res) => {
